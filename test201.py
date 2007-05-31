@@ -51,19 +51,55 @@ class ThreadBot:
 		return thr
 
 	def do_help(self, cl, msg):
-		cl.send(xmpp.Message(msg.getFrom(), """this particular testbot tries to tell you something about your XEP-0201 (Best Practices for Message Threads) implementation.
+		m = msg.buildReply("""this particular testbot tries to tell you something about your XEP-0201 (Best Practices for Message Threads) implementation.
+
+different types of messages are handled differently. unless noted otherwise, you should be able to send either a message[@type='normal'] or a message[@type='chat'] and have me respond via the same method.
 
 'help': this message
-'newthread': i send you a message (of the same type that you sent) with a new ThreadID
+'newthread': i send a message starting a new session
+'run': (chat only) i run through a series of scenarios to check your client's compliance
 <any other message>: details about what thread your message belongs to
-			""", typ=msg.getType()))
+			""")
+		m.setType(msg.getType())
+		cl.send(m)
 
 	def do_newthread(self, cl, msg):
-		threadid = self.make_threadid()
-		res = xmpp.Message(msg.getFrom(), """this is the first message of thread '%s'. if you reply directly to it, your message should be part of the same thread.""" % threadid, typ=msg.getType())
-		res.NT.thread = threadid
+		thread_id = self.make_threadid()
+		m = msg.buildReply("""this is the first message of thread '%s'. if you reply directly to it, your message should be part of the same thread.""" % thread_id)
+		m.setType(msg.getType())
+		m.setThread(thread_id)
+		cl.send(m)
 
-		cl.send(res)
+	def do_run_chat_1(self, cl, msg, session):
+		if session['thread_id'] == msg.getThread():
+			reply = 'ok, your message contained the same thread ID. this message contains a different thread ID, so your client should recognize it as part of a new session. reply to this message to continue.'
+
+			thread_id = self.make_threadid()
+			self.sessions[thread_id] = { 'thread_id': thread_id, 'continue': self.do_run_chat_2 }
+		else:
+			reply = '''!!! i expected you to send thread_id '%s', but you sent '%s'.''' % (session['thread_id'], msg.getThread())
+			del self.sessions[session['thread_id']]
+
+		m = msg.buildReply(reply)
+		m.setType('chat')
+		if thread_id:
+			m.setThread(thread_id)
+		cl.send(m)
+
+	def do_run_chat_2(self, cl, msg, session):
+		if session['thread_id'] == msg.getThread():
+			reply = 'ok, your client responded with the thread ID i was expecting. this is as far as the test goes for now.'
+
+			# XXX from another resource
+			# XXX terminate session
+			del self.sessions[session['thread_id']]
+		else:
+			reply = '''!!! i expected you to send thread_id '%s', but you sent '%s'.''' % (session['thread_id'], msg.getThread())
+			del self.sessions[session['thread_id']]
+
+		m = msg.buildReply(reply)
+		m.setType('chat')
+		cl.send(m)
 
 	def presenceCB(self, cl, msg):
 		if msg.getType() == "subscribe":
@@ -71,10 +107,36 @@ class ThreadBot:
 			cl.send(xmpp.dispatcher.Presence(to=msg.getFrom(), typ="subscribed"))
 
 	def messageCB(self, cl, msg):
-		threadid = msg.getTagData("thread")
+		thread_id = msg.getThread()
+
+		if self.sessions.has_key(thread_id) and isinstance(self.sessions[thread_id], dict):
+			session = self.sessions[thread_id]
+			session['continue'](cl, msg, session)
+			return
 
 		sender = msg.getFrom()
 		body = msg.getBody()
+
+		if body == 'run':
+			if msg.getType() != 'chat':
+				m = msg.buildReply("""this command is only supported for chat messages. 'help' for more details.""")
+				m.setType(msg.getType())
+				cl.send(m)
+				return
+
+			if not thread_id:
+				m = msg.buildReply('''!!! your message didn't contain a thread ID at all. i doubt your client supports any of XEP-0201, so i'm aborting the rest of the test.''')
+				m.setType('chat')
+				cl.send(m)
+				return
+
+			m = msg.buildReply('''ok, your message contained a thread ID. this one contains the same one, so your client should recognize it as part of the same session. reply to this message to continue''')
+			m.setType('chat')
+			cl.send(m)
+
+			self.sessions[thread_id] = { 'continue': self.do_run_chat_1, 'thread_id' : thread_id }
+
+			return
 
 		if body == "help":
 			self.do_help(cl, msg)
@@ -85,46 +147,43 @@ class ThreadBot:
 			return
 
 		if not msg.getType() or msg.getType() == "normal":
-			if not threadid:
+			if not thread_id:
 				reply = "your message had no <thread/>, so it's not part of one (and neither is this message)"
-			elif threadid in self.sessions:
-				reply = ("your message was part of thread '%s' (and so is this one)" % threadid)
+			elif thread_id in self.sessions:
+				reply = "your message was part of thread '%s' (and so is this one)" % thread_id
 			else:
-				self.sessions[threadid] = True
-				reply = ("you have started a new thread '%s', this message is part of it" % threadid)
+				self.sessions[thread_id] = True
+				reply = "you have started a new thread '%s', this message is part of it" % thread_id
 
 			if reply:
-				res = xmpp.Message(sender, reply)
-				if threadid:
-					res.NT.thread = threadid
-
-				cl.send(res)
+				cl.send(msg.buildReply(reply))
 
 			return
 
 		if msg.getType() == "chat":
-			if not threadid:
+			if not thread_id:
 				if sender in self.nullsessions:
 					reply = "your message had no <thread/>, I've already got a null-thread session for you so I'm considering it to be part of that (this reply is too)"
-					threadid = self.nullsessions[sender]
+					thread_id = self.nullsessions[sender]
 				else:
 					reply = "your message had no <thread/>, and I have no existing sessions with you in which you haven't sent a <thread/>, so I'm starting a new thread (that this reply is part of)"
-					threadid = self.make_threadid()
-					self.nullsessions[sender] = threadid
+					thread_id = self.make_threadid()
+					self.nullsessions[sender] = thread_id
 
 			else:
-				if threadid in self.sessions:
+				if thread_id in self.sessions:
 					reply = "your message is part of an existing thread (and so is this reply)"
 				else:
 					reply = "you started a new thread with your message (this reply is in it too)"
-					self.sessions[threadid] = True
+					self.sessions[thread_id] = True
 
 					if sender in self.nullsessions:
 						del self.nullsessions[sender]
 
 			if reply:
-				res = xmpp.Message(sender, reply, typ="chat")
-				res.NT.thread = threadid
+				m = msg.buildReply()
+				m.setType('chat')
+				m.setThread(thread_id)
 
 				cl.send(res)
 
