@@ -90,8 +90,9 @@ different types of messages are handled differently. unless noted otherwise, you
 		if session['thread_id'] == msg.getThread():
 			reply = 'ok, your client responded with the thread ID i was expecting. this is as far as the test goes for now.'
 
-			# XXX from another resource
+			# XXX send with the same thread ID from another resource
 			# XXX terminate session
+			# XXX go offline (session should continue)
 			del self.sessions[session['thread_id']]
 		else:
 			reply = '''!!! i expected you to send thread_id '%s', but you sent '%s'.''' % (session['thread_id'], msg.getThread())
@@ -181,11 +182,11 @@ different types of messages are handled differently. unless noted otherwise, you
 						del self.nullsessions[sender]
 
 			if reply:
-				m = msg.buildReply()
+				m = msg.buildReply(reply)
 				m.setType('chat')
 				m.setThread(thread_id)
 
-				cl.send(res)
+				cl.send(m)
 
 			return
 
