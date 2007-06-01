@@ -181,4 +181,4 @@ different types of messages are handled differently. unless noted otherwise, you
 
 			return
 
-ThreadBot("test@necronomicorp.com", "test").run()
+ThreadBot("bot2@necronomicorp.com", "silenceotss").run()
