@@ -1,44 +1,19 @@
 #!/usr/bin/python
 
 import xmpp
-import random, string
 
-class NegotioBot:
-	def __init__(self, jid, password):
-		self.jid = xmpp.protocol.JID(jid)
-		self.password = password
-		self.sessions = {}
+from basebot import BaseBot
 
-	def run(self):
-		self.cl = xmpp.Client(self.jid.getDomain(), debug=[])
+class NegotioBot(BaseBot):
+	def do_begin(self, cl, msg, sess):
+		if sess and sess.has_key('status') and sess['status'] == 'agreed':
+			cl.send(msg.buildReply('we\'ve already negotiated a session, thank you.'))
+			return
 
-		res = self.cl.connect()
-
-		if not res:
-			print "Unable to connect."
-			sys.exit(1)
-
-		res = self.cl.auth(self.jid.getNode(), self.password)
-
-		if not res:
-			print "unable to authorize."
-			sys.exit(1)
-
-		self.cl.RegisterHandler('message', self.messageCB)
-		self.cl.RegisterHandler('presence', self.presenceCB)
-		self.cl.sendInitPresence()
-
-		print "listening."
-
-		while 1:
-			self.cl.Process(1)
-
-	def make_threadid(self):
-		return "".join([random.choice(string.letters) for x in xrange(3000)])
-
-	def make_initiate(self, to):
+		to = msg.getFrom()
+		sess = self.new_session(to)
 		reply = xmpp.Message(to)
-		reply.NT.thread = self.make_threadid()
+		reply.NT.thread = sess['thread_id']
 		feature = reply.NT.feature
 		feature.setNamespace(xmpp.NS_FEATURE)
 
@@ -51,62 +26,98 @@ class NegotioBot:
 		x.addChild(node=accept)
 
 		goofy = xmpp.DataField(name="x-politeness", typ="boolean", required=1, value="true")
+		goofy.setAttr("label", "Promise to be polite?")
 
 		x.addChild(node=goofy)
 
 		# xmpp.DataField(options=[["English", "en"], ["Italiano", "it"]]
 
-		feature.addChild(node = x)
+		feature.addChild(node=x)
  # <amp xmlns='http://jabber.org/protocol/amp'>
  #	 <rule action='drop' condition='deliver' value='stored'/>
  # </amp>
 
-		return reply
-
-	def terminate(self, jid):
-		# XXX
-		pass
+		sess['status'] = 'requested'
+		cl.send(reply)
 
 	def presenceCB(self, cl, msg):
 		if msg.getType() == "subscribe":
 			# automatically approve subscription requests
 			cl.send(xmpp.dispatcher.Presence(to=msg.getFrom(), typ="subscribed"))
 
-	def sessionExists(self, jid, threadid):
-		if not jid in self.sessions:
-			return False
+	def handle_rejection(self, cl, msg, sess):
+		m = msg.buildReply('you rejected the session negotiation.')
+		m.setType('chat')
+		cl.send(m)
 
-		sess = self.sessions[jid]
+		sess['status'] = 'rejected'
 
-		# XXX multiple threads :(
-		return sess
+	def handle_acceptance(self, cl, msg, sess, form):
+		pass
 
 	def messageCB(self, cl, msg):
 		sender = msg.getFrom()
 		body = msg.getBody()
-		threadid = msg.getTag("thread")
+		if not body:
+			body = ""
 
-		if self.sessionExists(sender, threadid) and not "please" in body:
-			cl.send(xmpp.Message(sender, "tsk tsk tsk, you didn't say 'please'. terminating session."), typ="chat")
-			self.terminate(sender)
-			return
+		thread_id = msg.getThread()
 
+		created_new_sess = False
+		sess = self.get_session(sender, thread_id)
+		if sess and sess.has_key('status') and sess['status'] == 'agreed':
+			if not "please" in body:
+				m = msg.buildReply("tsk tsk tsk, you didn't say 'please'. terminating session.")
+				m.setType("chat")
+				cl.send(m)
+				self.terminate_session(sender, thread_id)
+				return
+
+		if sess and sess.has_key('status') and sess['status'] == 'requested':
+			if msg.getTag('feature') and msg.getTag('feature').namespace == xmpp.NS_FEATURE:
+				form = xmpp.DataForm(node=msg.getTag('feature').getTag('x'))
+				if form['FORM_TYPE'] == 'urn:xmpp:ssn':
+					if form['accept'] in ('0', 'false'):
+						self.handle_rejection(cl, msg, sess)
+					elif form['accept'] in ('1', 'true'):
+						print 'ho'
+						self.handle_acceptance(cl, msg, sess, form)
+					else:
+						print 'let\'s go'
+						cl.send(msg.buildReply('''!!! field[@var='accept'] must be '0', '1', 'false' or 'true'. you sent '%s'.''' % form['accept']))
+
+					return
+				else:
+					reply = msg.buildReply()
+					reply.setType('error')
+
+					reply.addChild(feature)
+					reply.addChild(node=xmpp.ErrorNode('service-unavailable', typ='cancel'))
+
+					cl.send(reply)
+
+					return
+
+		if thread_id and not sess:
+			created_new_sess = True
+			sess = self.new_session(sender, thread_id)
+
+		reply = None
 		if body.startswith("help"):
-			reply = 'type "begin" to have me initiate a session (as described in XEP-0155)'
+			reply = 'type "negotiate" to have me initiate a session (as described in XEP-0155)'
 		elif body.startswith("begin"):
-			if self.sessionExists(sender, threadid):
-				cl.send(xmpp.Message(sender, 'a session has already begun, thank you.'))
-
-			cl.send(self.make_initiate(sender))
+			self.do_begin(cl, msg, sess)
 		elif not body:
 			 pass # XXX
 		else:
 			reply = "message acknowledged."
 
 		if reply:
-			if self.sessionExists(sender, threadid):
+			if sess and sess.has_key('status') and sess['status'] == 'agreed':
 				reply += " thank you."
 
-			cl.send(xmpp.Message(sender, reply, typ="chat")
+			m = msg.buildReply(reply)
+			m.setType('chat')
+			cl.send(m)
 
-NegotioBot("test@necronomicorp.com", "test").run()
+NegotioBot("bot2@necronomicorp.com", "silenceotss").run()
