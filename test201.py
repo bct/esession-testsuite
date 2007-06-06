@@ -4,11 +4,6 @@ import xmpp
 import session
 
 class FancySession(session.Session):
-	def __init__(self, dispatcher, conn, jid, thread_id, type = 'chat'):
-		session.Session.__init__(self, dispatcher, conn, jid, thread_id, type)
-
-		self.status = 'new'
-
 	def do_help(self):
 		self.send("""this particular testbot tries to tell you something about your XEP-0201 (Best Practices for Message Threads) implementation.
 
