@@ -1,22 +1,16 @@
 #!/usr/bin/python
 
 import xmpp
+import session
 
-# -> reply directly to this message[@type="normal"]
-# -> ok, the thread id matches the one i sent. your client should recognize this message as part of the same thread. i'm going to terminate the session now, you should get an "ok" message shortly.
-# -> ok, i got your acknowledgement.
+class FancySession(session.Session):
+	def __init__(self, dispatcher, conn, jid, thread_id, type = 'chat'):
+		session.Session.__init__(self, dispatcher, conn, jid, thread_id, type)
 
-# -> send me a message that's part of a new thread
-# -> ok, that's a new thread. your client should recognize this message as part of the same thread. now terminate the session
-# -> ok, session terminated.
+		self.status = 'new'
 
-# -> this message is from another resource using the same ThreadID. it should be considered part of a new session
-
-from basebot import BaseBot
-
-class ThreadBot(BaseBot):
-	def do_help(self, cl, msg):
-		m = msg.buildReply("""this particular testbot tries to tell you something about your XEP-0201 (Best Practices for Message Threads) implementation.
+	def do_help(self):
+		self.send("""this particular testbot tries to tell you something about your XEP-0201 (Best Practices for Message Threads) implementation.
 
 different types of messages are handled differently. unless noted otherwise, you should be able to send either a message[@type='normal'] or a message[@type='chat'] and have me respond via the same method.
 
@@ -24,161 +18,117 @@ different types of messages are handled differently. unless noted otherwise, you
 'newthread': i send a message starting a new session
 'status': details about the sessions i have with your resource
 'run': (chat only) i run through a series of scenarios to check your client's compliance
-<any other message>: details about what thread your message belongs to
-			""")
-		m.setType(msg.getType())
-		cl.send(m)
+<any other message>: details about what thread your message belongs to""")
 
-	def do_newthread(self, cl, msg):
-		new_sess = self.new_session(msg.getFrom())
-		thread_id = new_sess['thread_id']
+	def do_newthread(self):
+		new_sess = self.dispatcher.start_new_session(self.jid, type=self.type)
+		thread_id = new_sess.thread_id
 
-		m = msg.buildReply("""this is the first message of thread '%s'. if you reply directly to it, your message should be part of the same thread.""" % thread_id)
-		m.setType(msg.getType())
-		m.setThread(thread_id)
-		cl.send(m)
+		new_sess.send("""this is the first message of thread '%s'. if you reply directly to it, your message should be part of the same thread.""" % thread_id)
+		new_sess.status = 'existing'
 
-	def do_status(self, cl, msg):
-		if self.sessions.has_key(msg.getFrom()):
-			text = 'I have the following sessions with the Full JID "%s":\n' % msg.getFrom()
+	def do_status(self):
+		if self.dispatcher.sessions.has_key(self.jid):
+			text = 'I have the following sessions with the Full JID "%s":\n' % self.jid
 
-			for thread_id in self.sessions[msg.getFrom()]:
-				text += '\n%s: %s' % (thread_id, self.sessions[msg.getFrom()][thread_id])
+			for session in self.dispatcher.sessions[self.jid].values():
+				text += '\n' + str(session)
 
-			m = msg.buildReply(text)
-			cl.send(m)
+			self.send(text)
 		else:
-		  cl.send(msg.buildReply('i have no sessions with the Full JID "%s".' % msg.getFrom()))
+		  self.send('i have no sessions with the Full JID "%s".' % self.jid)
 
-	# state machine test
-	def do_run_chat_1(self, cl, msg, session):
-		if session['thread_id'] == msg.getThread():
-			reply = 'ok, your message contained the same thread ID. this message contains a different thread ID, so your client should recognize it as part of a new session. reply to this message to continue.'
-
-			self.terminate_session(msg.getFrom(), session['thread_id'])
-
-			sess = self.new_session(msg.getFrom())
-			sess['status'] = 'run'
-			sess['continue'] = self.do_run_chat_2
-			new_thread_id = sess['thread_id']
+	def do_normal(self):
+		if self.received_thread_id:
+			if self.status == 'new':
+				self.send('''you have started a new thread '%s', this message is part of it.''' % self.thread_id)
+				self.status = 'existing'
+			else:
+				self.send('''your message was part of thread '%s' (and so is this one)''' % self.thread_id)
 		else:
-			reply = '''!!! i expected you to send thread_id '%s', but you sent '%s'.''' % (session['thread_id'], msg.getThread())
-			self.terminate_session(msg.getFrom(), session['thread_id'])
+			self.send("your message had no <thread/>, so it's not part of one (and neither is this message)") # XXX this is a lie
 
-		m = msg.buildReply(reply)
-		m.setType('chat')
-		if new_thread_id:
-			m.setThread(new_thread_id)
-		cl.send(m)
+	def do_chat(self):
+		if self.status == 'new':
+			if self.received_thread_id:
+				self.send("you started a new thread (id '%s') with your message (this reply is in it too)" % self.thread_id)
+			else:
+				self.send("your message had no <thread/>, and I have no existing sessions with you in which you haven't sent a <thread/>, so I'm starting a new thread (id '%s') (that this reply is part of)" % self.thread_id)
 
-	def do_run_chat_2(self, cl, msg, session):
-		if session['thread_id'] == msg.getThread():
-			reply = 'ok, your client responded with the thread ID i was expecting. this is as far as the test goes for now.'
-
-			# XXX send with the same thread ID from another resource
-			# XXX terminate session
-			# XXX go offline (session should continue)
-			self.terminate_session(msg.getFrom(), session['thread_id'])
+			self.status = 'existing'
 		else:
-			reply = '''!!! i expected you to send thread_id '%s', but you sent '%s'.''' % (session['thread_id'], msg.getThread())
-			self.terminate_session(msg.getFrom(), session['thread_id'])
+			if self.received_thread_id:
+				self.send("your message is part of existing thread '%s' (and so is this reply)" % self.thread_id)
+			else:
+				self.send("your message had no <thread/>, I've already got a null-thread session for you so I'm considering it to be part of that (id '%s') (this reply is in it too)" % self.thread_id)
 
-		m = msg.buildReply(reply)
-		m.setType('chat')
-		cl.send(m)
-
-	def messageCB(self, cl, msg):
-		thread_id = msg.getThread()
-
-		created_new_sess = False
-		sess = self.get_session(msg.getFrom(), thread_id)
-		if sess and sess.has_key('status') and sess['status'] == 'run':
-			sess['continue'](cl, msg, sess)
+	def do_run_chat_0(self):
+		if not self.received_thread_id:
+			self.send('''!!! your message didn't contain a thread ID at all. i doubt your client supports any of XEP-0201, so i'm aborting the rest of the test.''')
 			return
 
-		if thread_id and not sess:
-			created_new_sess = True
-			sess = self.new_session(msg.getFrom(), thread_id)
+		self.send('''ok, your message contained a thread ID. this one contains the same one, so your client should recognize it as part of the same session.
 
-		sender = msg.getFrom()
+reply to this message to continue. the next message you receive should begin with 'ok'.''')
+
+		self.status = 'run'
+		self.proceed = self.do_run_chat_1
+
+	def do_run_chat_1(self, msg):
+		if not self.received_thread_id:
+			self.send('''!!! you replied to the message, but you didn't include a <thread/> (as RECOMMENDed by XEP-0201)''')
+			self.terminate()
+			return
+
+		self.terminate()
+
+		new_sess = self.dispatcher.start_new_session(self.jid, type='chat')
+		new_sess.status = 'run'
+		new_sess.proceed = new_sess.do_run_chat_2
+
+		new_sess.send('ok, your message contained the same thread ID. this message contains a different thread ID, so your client should recognize it as part of a new session. reply to this message to continue.')
+
+	def do_run_chat_2(self, msg):
+		if not self.received_thread_id:
+			self.send('''!!! you replied to the message, but you didn't include a <thread/> (as RECOMMENDed by XEP-0201)''')
+			self.terminate()
+			return
+
+		self.send('ok, your client responded with the thread ID i was expecting. this is as far as the test goes for now.')
+
+		# XXX send with the same thread ID from another resource
+		# XXX terminate session
+		# XXX go offline (session should continue)
+
+	def terminate(self):
+		session.Session.terminate(self)
+		self.proceed = self.terminated
+
+	def terminated(self, msg):
+		self.send('''!!! this session was terminated, you shouldn't send any more messages to it.''')
+
+	def handle_message(self, msg):
+		if self.status == 'run':
+			self.proceed(msg)
+			return
+
 		body = msg.getBody()
 
 		if body == 'run':
 			if msg.getType() != 'chat':
-				m = msg.buildReply("""this command is only supported for chat messages. 'help' for more details.""")
-				m.setType(msg.getType())
-				cl.send(m)
+				self.send('''this command is only supported for chat messages. 'help' for more details.''')
 				return
 
-			if not thread_id:
-				m = msg.buildReply('''!!! your message didn't contain a thread ID at all. i doubt your client supports any of XEP-0201, so i'm aborting the rest of the test.''')
-				m.setType('chat')
-				cl.send(m)
-				return
+			self.do_run_chat_0()
+		elif body == 'help':
+			self.do_help()
+		elif body == 'newthread':
+			self.do_newthread()
+		elif body == 'status':
+			self.do_status()
+		elif not msg.getType() or msg.getType() == 'normal':
+			self.do_normal()
+		elif msg.getType() == "chat":
+			self.do_chat()
 
-			m = msg.buildReply('''ok, your message contained a thread ID. this one contains the same one, so your client should recognize it as part of the same session. reply to this message to continue''')
-			m.setType('chat')
-			cl.send(m)
-
-			sess['status'] = 'run'
-			sess['continue'] = self.do_run_chat_1
-
-			return
-
-		if body == 'help':
-			self.do_help(cl, msg)
-			return
-
-		if body == 'newthread':
-			self.do_newthread(cl, msg)
-			return
-
-		if body == 'status':
-			self.do_status(cl, msg)
-			return
-
-		if not msg.getType() or msg.getType() == "normal":
-			if thread_id:
-				if created_new_sess:
-					reply = "you have started a new thread '%s', this message is part of it" % thread_id
-				else:
-					reply = "your message was part of thread '%s' (and so is this one)" % thread_id
-			else:
-				reply = "your message had no <thread/>, so it's not part of one (and neither is this message)"
-
-			if reply:
-				cl.send(msg.buildReply(reply))
-
-			return
-
-		if msg.getType() == "chat":
-			if not thread_id:
-				if sender in self.nullsessions:
-					reply = "your message had no <thread/>, I've already got a null-thread session for you so I'm considering it to be part of that (this reply is too)"
-					thread_id = self.nullsessions[sender]
-				else:
-					reply = "your message had no <thread/>, and I have no existing sessions with you in which you haven't sent a <thread/>, so I'm starting a new thread (that this reply is part of)"
-					sess = self.new_session(msg.getFrom())
-					sess['type'] = 'null'
-					thread_id = sess['thread_id']
-					self.nullsessions[sender] = thread_id
-
-			else:
-				if created_new_sess:
-					reply = "you started a new thread with your message (this reply is in it too)"
-
-					if sender in self.nullsessions:
-						del self.nullsessions[sender]
-				else:
-					reply = "your message is part of an existing thread (and so is this reply)"
-
-			if reply:
-				m = msg.buildReply(reply)
-				m.setType('chat')
-				m.setThread(thread_id)
-
-				cl.send(m)
-
-			return
-
-ThreadBot("bot2@necronomicorp.com", "silenceotss").run()
+session.SessionDispatcher("bot2@necronomicorp.com", "silenceotss", FancySession).run()

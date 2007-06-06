@@ -1,19 +1,17 @@
 #!/usr/bin/python
 
 import xmpp
+import session
 
-from basebot import BaseBot
+class FancySession(session.Session):
+	def do_begin(self, msg):
+		if self.status == 'agreed':
+			self.send('''we've negotiated a session already, but i'll start a new one anyways.''')
 
-class NegotioBot(BaseBot):
-	def do_begin(self, cl, msg, sess):
-		if sess and sess.has_key('status') and sess['status'] == 'agreed':
-			cl.send(msg.buildReply('we\'re in a session, but i\'ll start a new one.'))
-
-		to = msg.getFrom()
-		sess = self.new_session(to)
-		reply = xmpp.Message(to)
-		reply.NT.thread = sess['thread_id']
-		feature = reply.NT.feature
+		new_sess = self.dispatcher.start_new_session(self.jid, type=self.type)
+		new_sess.status = 'requested'
+		request = xmpp.Message()
+		feature = request.NT.feature
 		feature.setNamespace(xmpp.NS_FEATURE)
 
 		x = xmpp.DataForm(title = "Open chat with Negotiobot?", typ="form")
@@ -36,23 +34,16 @@ class NegotioBot(BaseBot):
  #	 <rule action='drop' condition='deliver' value='stored'/>
  # </amp>
 
-		sess['status'] = 'requested'
-		cl.send(reply)
+		self.status = 'requested'
+		new_sess.send(request, False)
 
-	def presenceCB(self, cl, msg):
-		if msg.getType() == "subscribe":
-			# automatically approve subscription requests
-			cl.send(xmpp.dispatcher.Presence(to=msg.getFrom(), typ="subscribed"))
+	def handle_rejection(self, msg):
+		self.send('you rejected the session negotiation.')
 
-	def handle_rejection(self, cl, msg, sess):
-		m = msg.buildReply('you rejected the session negotiation.')
-		m.setType('chat')
-		cl.send(m)
+		self.status = 'rejected'
 
-		sess['status'] = 'rejected'
-
-	def handle_acceptance(self, cl, msg, sess, form):
-		acceptance = msg.buildReply()
+	def handle_acceptance(self, msg, form):
+		acceptance = xmpp.Message()
 		feature = acceptance.NT.feature
 		feature.setNamespace(xmpp.NS_FEATURE)
 
@@ -62,88 +53,67 @@ class NegotioBot(BaseBot):
 
 		feature.addChild(node=x)
 
-		cl.send(acceptance)
+		self.send(acceptance, False)
 
-		sess['status'] = 'agreed'
+		self.status = 'agreed'
 		if form['x-politeness'] in ('0', 'false'):
-			sess['polite'] = False
+			self.polite = False
 		elif form['x-politeness'] in ('1', 'true'):
-			sess['polite'] = True
+			self.polite = True
 
-		if sess['polite']:
-			reply = 'you accepted my session and promised to be polite. please say \'please\' with all your messages, thank you.'
+		if self.polite:
+			self.send('you accepted my session and promised to be polite. please say \'please\' with all your messages, thank you.')
 		else:
-			reply = 'you accepted my session, but didn\'t promise to be polite.'
+			self.send('you accepted my session, but didn\'t promise to be polite.')
 
-		m = msg.buildReply(reply)
-		m.setThread(sess['thread_id'])
-
-		cl.send(m)
-
-	def messageCB(self, cl, msg):
-		sender = msg.getFrom()
+	def handle_message(self, msg):
 		body = msg.getBody()
-		if not body:
-			body = ""
 
-		thread_id = msg.getThread()
+		if self.status == 'agreed' and self.polite and not 'please' in body:
+			self.send('''tsk tsk tsk, you didn't say 'please'. terminating session.''')
+			self.terminate()
+			return
 
-		created_new_sess = False
-		sess = self.get_session(sender, thread_id)
-		if sess and sess.has_key('status') and sess['status'] == 'agreed' and sess['polite']:
-			if not "please" in body:
-				m = msg.buildReply("tsk tsk tsk, you didn't say 'please'. terminating session.")
-				m.setType("chat")
-				cl.send(m)
-				self.terminate_session(sender, thread_id)
-				return
-
-		if sess and sess.has_key('status') and sess['status'] == 'requested':
+		if self.status == 'requested':
 			if msg.getTag('feature') and msg.getTag('feature').namespace == xmpp.NS_FEATURE:
 				form = xmpp.DataForm(node=msg.getTag('feature').getTag('x'))
 				if form['FORM_TYPE'] == 'urn:xmpp:ssn':
 					if form.getType() != 'submit':
-						cl.send(msg.buildReply('your form was of type \'%s\', it should be of type \'submit\'.' % form.getType()))
+						self.send('''your form was of type '%s', it should be of type 'submit'.''' % form.getType())
 
 					if form['accept'] in ('0', 'false'):
-						self.handle_rejection(cl, msg, sess)
+						self.handle_rejection(msg)
 					elif form['accept'] in ('1', 'true'):
-						self.handle_acceptance(cl, msg, sess, form)
+						self.handle_acceptance(msg, form)
 					else:
-						cl.send(msg.buildReply('''!!! field[@var='accept'] must be '0', '1', 'false' or 'true'. you sent '%s'.''' % form['accept']))
+						self.send('''!!! field[@var='accept'] must be '0', '1', 'false' or 'true'. you sent '%s'.''' % form['accept'])
 
 					return
 				else:
-					reply = msg.buildReply()
+					reply = xmpp.Message()
 					reply.setType('error')
 
 					reply.addChild(feature)
 					reply.addChild(node=xmpp.ErrorNode('service-unavailable', typ='cancel'))
 
-					cl.send(reply)
+					self.send(reply, False)
 
 					return
 
-		if thread_id and not sess:
-			created_new_sess = True
-			sess = self.new_session(sender, thread_id)
-
 		reply = None
 		if body.startswith("help"):
-			reply = 'type "negotiate" to have me initiate a session (as described in XEP-0155)'
+			reply = 'type "negotiate" to have me initiate a session (as described in XEP-0155).'
 		elif body.startswith("begin"):
-			self.do_begin(cl, msg, sess)
+			self.do_begin(msg)
 		elif not body:
 			 pass # XXX
 		else:
 			reply = "message acknowledged."
 
 		if reply:
-			if sess and sess.has_key('status') and sess['status'] == 'agreed' and sess['polite']:
+			if self.status == 'agreed' and self.polite:
 				reply += " thank you."
 
-			m = msg.buildReply(reply)
-			m.setType('chat')
-			cl.send(m)
+			self.send(reply)
 
-NegotioBot("bot2@necronomicorp.com", "silenceotss").run()
+session.SessionDispatcher("bot2@necronomicorp.com", "silenceotss", FancySession).run()
