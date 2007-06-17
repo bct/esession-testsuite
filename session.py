@@ -84,7 +84,7 @@ class SessionDispatcher:
 		else:
 			return -1
 
-class Session:
+class Session(object):
 	def __init__(self, dispatcher, conn, jid, thread_id, type = 'chat'):
 		self.dispatcher = dispatcher
 		self.conn = conn

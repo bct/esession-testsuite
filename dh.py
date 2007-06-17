@@ -1,6 +1,9 @@
 import string
 
-# these constants come from RFC2409 and RFC3526
+# This file defines a number of constants; specifically, large primes suitable for
+# use with the Diffie-Hellman key exchange.
+#
+# These constants have been obtained from RFC2409 and RFC3526.
 
 generators = [	None, # one to get the right offset
 								2,
@@ -193,9 +196,12 @@ B1D510BD 7EE74D73 FAF36BC3 1ECFA268 359046F4 EB879F92
 60C980DD 98EDD3DF FFFFFFFF FFFFFFFF'''
 ]
 
-all_ascii = ''.join(map, chr, range(256))
+all_ascii = ''.join(map(chr, range(256)))
 
 def hex_to_decimal(stripee):
+	if not stripee:
+		return None
+
 	return int(stripee.translate(all_ascii, string.whitespace), 16)
 
 primes = map(hex_to_decimal, hex_primes)
