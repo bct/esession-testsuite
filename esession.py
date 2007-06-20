@@ -191,6 +191,9 @@ class ESession(session.Session):
     # FIXME: use a real PRNG
     return self.decode_mpi(os.urandom(bytes)) % (top - bottom) + bottom
 
+  def generate_nonce(self):
+    return self.random_bytes(8)
+
   def random_bytes(self, bytes):
     return os.urandom(bytes)
   
