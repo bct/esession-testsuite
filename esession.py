@@ -134,6 +134,9 @@ class ESession(session.Session):
     if not calculated_mac == received_mac:
       raise BadSignature #, received_mac, calculated_mac
 
+    if not (self.km_o and self.kc_o and self.c_o):
+      raise DecryptionError, "encryption keys aren't set yet!"
+
     m_final = base64.b64decode(c.getTagData('data'))
     m_compressed = self.decrypt(m_final)
     plaintext = self.decompress(m_compressed)
@@ -141,7 +144,7 @@ class ESession(session.Session):
     try:
       parsed = xmpp.Node(node='<node>' + plaintext + '</node>')
     except:
-      raise DecryptionError
+      raise DecryptionError, "decrypted message wasn't parseable as XML."
 
     for child in parsed.getChildren():
       stanza.addChild(node=child)

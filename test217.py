@@ -148,12 +148,12 @@ class FancySession(esession.ESession):
       else:
         pass # XXX we don't support this field
 
-    self.He = request_form.getField('dhhashes').getValues()[group_order].encode("utf8")
+    self.He = base64.b64decode(request_form.getField('dhhashes').getValues()[group_order].encode("utf8"))
 
     n = 128 # number of bits
     bytes = int(n / 8)
 
-    self.n_s = self.generate_nonce
+    self.n_s = self.generate_nonce()
 
     self.c_o = self.decode_mpi(self.random_bytes(bytes)) # n-bit random number
     self.c_s = self.c_o ^ (2 ** (n-1))
@@ -271,7 +271,7 @@ p: %s''' % (repr(self.d), repr(g), repr(self.y), repr(p)))
     p = dh.primes[self.modp]
 
     # return <feature-not-implemented/>
-    assert self.sha256(self.encode_mpi(e)) == self.He, "your 'e' doesn't match the hash you sent previously"
+    assert self.sha256(self.encode_mpi(e)) == self.He, "your 'e' doesn't match the hash you sent previously (SHA256(%s) != %s)" % (repr(self.encode_mpi(e)), self.He)
 
     # return <feature-not-implemented/> 
     assert e > 1, "your 'e' should be bigger than 1."
@@ -452,7 +452,10 @@ please attempt to initiate a XEP-0217 session with me.
 
     if c:
       was_encrypted = True
-      self.decrypt_stanza(msg)
+      try:
+        self.decrypt_stanza(msg)
+      except DecryptionError, err:
+        self.send('''you sent an encrypted message, but can't decrypt it: %s''' % err)
     else:
       was_encrypted = False
 
