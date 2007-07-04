@@ -454,7 +454,7 @@ please attempt to initiate a XEP-0217 session with me.
       was_encrypted = True
       try:
         self.decrypt_stanza(msg)
-      except DecryptionError, err:
+      except esession.DecryptionError, err:
         self.send('''you sent an encrypted message, but can't decrypt it: %s''' % err)
     else:
       was_encrypted = False
