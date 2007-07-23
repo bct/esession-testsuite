@@ -17,8 +17,8 @@ class BadSignature(RuntimeError):
   pass
 
 class ESession(session.Session):
-  def __init__(self, dispatcher, conn, jid, thread_id, type = 'chat'):
-    session.Session.__init__(self, dispatcher, conn, jid, thread_id, type = 'chat')
+  def __init__(self, **args):
+    session.Session.__init__(self, **args)
 
     self.n = 128
 

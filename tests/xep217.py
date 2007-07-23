@@ -12,8 +12,8 @@ import c14n
 import base64
 
 class FancySession(esession.ESession):
-  def __init__(self, dispatcher, conn, jid, thread_id, type = 'chat'):
-    esession.ESession.__init__(self, dispatcher, conn, jid, thread_id, type = 'chat')
+  def __init__(self, **args):
+    esession.ESession.__init__(self, **args)
 
     self.xes = {}
     self.es = {}
@@ -494,5 +494,3 @@ please attempt to initiate a XEP-0217 session with me.
         self.send('''received an encrypted message. 'help' for assistance.''')
       else:
         self.send('''received an unencrypted message. 'help' for assistance.''')
-
-session.SessionDispatcher('bot2@necronomicorp.com', 'silenceotss', FancySession).run()

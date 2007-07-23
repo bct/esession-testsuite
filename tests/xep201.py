@@ -125,5 +125,3 @@ reply to this message to continue. the next message you receive should begin wit
 			self.do_normal()
 		elif msg.getType() == "chat":
 			self.do_chat()
-
-session.SessionDispatcher("bot2@necronomicorp.com", "silenceotss", FancySession).run()

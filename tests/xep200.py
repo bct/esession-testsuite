@@ -8,8 +8,8 @@ from Crypto.Cipher import AES
 from Crypto.Hash import SHA256
 
 class FancySession(esession.ESession):
-  def __init__(self, dispatcher, conn, jid, thread_id, type = 'chat'):
-    esession.ESession.__init__(self, dispatcher, conn, jid, thread_id, type = 'chat')
+  def __init__(self, **args):
+    esession.ESession.__init__(self, **args)
     
     self.n = 128   # number of bits
     bytes = self.n / 8
@@ -84,5 +84,3 @@ send me an encrypted message to run the tests.""")
 - are you using the correct representation of your counter?
 - are you using the right key?
 - did you include all the contents of <c/>, except <mac/>, with whitespace removed?''')
-
-session.SessionDispatcher("bot2@necronomicorp.com", "silenceotss", FancySession).run()

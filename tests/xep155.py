@@ -115,5 +115,3 @@ class FancySession(session.Session):
 				reply += " thank you."
 
 			self.send(reply)
-
-session.SessionDispatcher("bot2@necronomicorp.com", "silenceotss", FancySession).run()
