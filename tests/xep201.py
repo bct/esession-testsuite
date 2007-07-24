@@ -107,17 +107,17 @@ reply to this message to continue. the next message you receive should begin wit
     self.send('''!!! this session was terminated, you shouldn't send any more messages to it.''')
 
   def handle_message(self, msg):
+    if not msg.getType() or msg.getType() == 'normal':
+      self.do_normal()
+    elif msg.getType() == "chat":
+      self.do_chat()
+
     if session.Session.handle_message(self, msg):
       return
 
     if self.status == 'run':
       self.proceed(msg)
       return
-    
-    if not msg.getType() or msg.getType() == 'normal':
-      self.do_normal()
-    elif msg.getType() == "chat":
-      self.do_chat()
   
   handlers = { 'help': show_help,
                'run': do_run_chat_0,
