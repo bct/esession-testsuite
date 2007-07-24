@@ -35,6 +35,8 @@ class Session(object):
     if self.thread_id:
       msg.setThread(self.thread_id)
 
+    msg.setType('chat')
+
     msg.setAttr('from', self.my_jid)
     msg.setAttr('to', self.eir_jid)
     self.conn.send(msg)
@@ -42,7 +44,10 @@ class Session(object):
     self.last_send = time.time()
 
   def handle_message(self, msg):
-    pass
+    body = msg.getBody()
+    if body in self.handlers:
+      self.handlers[body](self, msg)
+      return True
 
   def terminate(self):
     self.status = 'terminated'

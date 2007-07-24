@@ -9,7 +9,7 @@ server = 'mi-go'
 port = 5350
 secret = 'sooper-secret'
 
-jids = { 'xep155': xep155.FancySession,
+jids = { 'xep155': xep155.SessionNegotiation,
          'xep200': xep200.FancySession,
          'xep201': xep201.FancySession,
          'xep217': xep217.FancySession, 
@@ -59,7 +59,7 @@ class TestSuite:
     elif type == 'error':
       return
     else:
-      self.jabber.send(Presence(to=fromjid, frm = to))
+      self.conn.send(Presence(to=fromjid, frm = to))
 
   def messageCB(self, conn, msg):
     thread_id = msg.getThread()
@@ -99,7 +99,7 @@ class TestSuite:
       return -1
 
   def start_new_session(self, my_jid, eir_jid, klass, thread_id = None):
-    sess = klass(self, self.conn, my_jid, eir_jid, thread_id)
+    sess = klass(dispatcher=self, conn=self.conn, my_jid=my_jid, eir_jid=eir_jid, thread_id=thread_id)
     thread_id = sess.thread_id
 
     if not my_jid in self.sessions:

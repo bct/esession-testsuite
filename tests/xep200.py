@@ -17,18 +17,15 @@ class FancySession(esession.ESession):
     self.cipher = AES
     self.hash_alg = SHA256
 
-    self.de_key = '................'
-    self.en_key = '----------------'
-
-    self.de_counter = 777
-    self.en_counter = 777 ^ (2 ** (self.n - 1))
-
-    self.encrypter = self.cipher.new(self.en_key, self.cipher.MODE_CTR, counter=self.encryptcounter)
-    self.decrypter = self.cipher.new(self.de_key, self.cipher.MODE_CTR, counter=self.decryptcounter)
-
     self.compression = None
 
-  def do_help(self):
+    self.kc_o = '................'
+    self.kc_s = '----------------'
+
+    self.c_o = 777
+    self.c_s = 777 ^ (2 ** (self.n - 1))
+
+  def show_help(self, msg):
     self.send("""this bot tests your client's ability to exchange encrypted messages.
 
 this is intended to be used before you've implemented XEPs 0217 or 0116, so values that are normally negotiated should be hardcoded.
@@ -54,6 +51,9 @@ send me an encrypted message to run the tests.""")
     self.send('''!!! this session was terminated, you shouldn't send any more messages to it.''')
 
   def handle_message(self, msg):
+    if session.Session.handle_message(self, msg):
+      return
+
     if self.status == 'run':
       self.proceed(msg)
       return
@@ -61,26 +61,27 @@ send me an encrypted message to run the tests.""")
     body = msg.getBody()
     c = msg.getTag(name='c', namespace='http://www.xmpp.org/extensions/xep-0200.html#ns')
 
-    if body == 'help':
-      self.do_help()
-    elif body:
+    if body:
       self.send('''your message was not encrypted. 'help' for more details.''')
     elif c:
+      old_counter = self.c_o
       try:
         msg = self.decrypt_stanza(msg)
         self.enable_encryption = True
 
-        self.send('''ok, i just successfully decrypted the message you sent. :) if you get this one, we should be gravy. ''')
+        self.send('''ok, message successfully decrypted! this one is encrypted, if you can read it then your client works.''')
       except esession.DecryptionError:
         self.send('''!!! I couldn't decrypt your message!
 
-- is your counter set correctly? (should be: XXX)
+- is your counter set correctly? (should have been %d: *before you sent your message*)
 - are you using the correct representation of your counter? (big-endian bitstring, padded with zeroes to 16 bytes)
-- are you using the right key? (should be: XXX)''')
+- are you using the right encryption key? (should be: %s)''' % (old_counter, repr(self.kc_o)))
       except esession.BadSignature:
         self.send('''!!! I calculated a different <mac/> than the one you gave!
 
-- is your counter set correctly?
-- are you using the correct representation of your counter?
-- are you using the right key?
-- did you include all the contents of <c/>, except <mac/>, with whitespace removed?''')
+- is your counter set correctly? (should have been %d: *before you sent your message*)
+- are you using the correct representation of your counter? (big-endian bitstring, padded with zeroes to 16 bytes)
+- are you using the right encryption key? (should be: %s)
+- did you include all the contents of <c/>, except <mac/>, with whitespace removed?''' % (old_counter, repr(self.kc_o)))
+  
+  handlers = { 'help': show_help, }

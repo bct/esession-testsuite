@@ -49,15 +49,14 @@ class ESession(session.Session):
   kc_s = property(get_kc_s, set_kc_s)
   kc_o = property(get_kc_o, set_kc_o)
 
-  # add encryption to a message
-  def send(self, msg, add_type = True):
+  def send(self, msg):
     if isinstance(msg, str) or isinstance(msg, unicode):
       msg = xmpp.Message(body=msg)
 
     if self.enable_encryption:
       msg = self.encrypt_stanza(msg)
     
-    session.Session.send(self, msg, add_type)
+    session.Session.send(self, msg)
 
   # convert a large integer to a big-endian bitstring
   def encode_mpi(self, n):

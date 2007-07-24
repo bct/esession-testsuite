@@ -37,7 +37,7 @@ class FancySession(esession.ESession):
     return base64.b64encode(He)
 
   # 4.1 esession request (alice)
-  def alice_initiates(self):
+  def alice_initiates(self, msg):
     request = xmpp.Message()
     feature = request.NT.feature
     feature.setNamespace(xmpp.NS_FEATURE)
@@ -440,7 +440,7 @@ content: %s
 expected: %s
 calculated: %s'''  % (repr(name), repr(key), repr(content), repr(expected), repr(calculated))
 
-  def do_help(self):
+  def show_help(self, msg):
     self.send('''this bot tests XEP-0217.
 
 please attempt to initiate a XEP-0217 session with me.
@@ -459,13 +459,7 @@ please attempt to initiate a XEP-0217 session with me.
     else:
       was_encrypted = False
 
-    body = msg.getBody()
-
-    if body and body.strip() == 'help':
-      self.do_help()
-      return
-    elif body and body.strip() == 'begin':
-      self.alice_initiates()
+    if session.Session.handle_message(self, msg):
       return
 
     feature = msg.getTag(name='feature', namespace=xmpp.NS_FEATURE)
@@ -494,3 +488,8 @@ please attempt to initiate a XEP-0217 session with me.
         self.send('''received an encrypted message. 'help' for assistance.''')
       else:
         self.send('''received an unencrypted message. 'help' for assistance.''')
+  
+  handlers = { 'help': show_help,
+               'begin': alice_initiates,
+      }
+
