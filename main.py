@@ -1,13 +1,16 @@
 #!/usr/bin/python
 
+# usage: ./main.py <component-name> <server> <port> <secret>
+
+#name = 'testsuite'
+#server = 'mi-go'
+#port = 5350
+
 from xmpp import *
 
 from tests import *
 
-name = 'testsuite'
-server = 'mi-go'
-port = 5350
-secret = 'sooper-secret'
+import sys
 
 jids = { 'xep155': xep155.SessionNegotiation,
          'xep200': xep200.FancySession,
@@ -113,5 +116,5 @@ class TestSuite:
     return sess
 
 if __name__ == '__main__':
-  transport = TestSuite(name=name, server=server, port=port, secret=secret, handlers=jids)
+  transport = TestSuite(name=sys.argv[1], server=sys.argv[2], port=sys.argv[3], secret=sys.argv[4], handlers=jids)
   transport.xmpp_connect()
