@@ -31,11 +31,10 @@ class Session(object):
   def send(self, msg):
     if isinstance(msg, str) or isinstance(msg, unicode):
       msg = xmpp.Message(body=msg)
+      msg.setType('chat')
 
     if self.thread_id:
       msg.setThread(self.thread_id)
-
-    msg.setType('chat')
 
     msg.setAttr('from', self.my_jid)
     msg.setAttr('to', self.eir_jid)

@@ -38,7 +38,7 @@ class SessionNegotiation(session.Session):
  # </amp>
 
     self.status = 'requested'
-    new_sess.send(request, False)
+    new_sess.send(request)
 
   def handle_rejection(self, msg):
     self.send('you rejected the session negotiation.')
@@ -56,7 +56,7 @@ class SessionNegotiation(session.Session):
 
     feature.addChild(node=x)
 
-    self.send(acceptance, False)
+    self.send(acceptance)
 
     self.status = 'agreed'
 
@@ -103,7 +103,7 @@ class SessionNegotiation(session.Session):
           reply.addChild(feature)
           reply.addChild(node=xmpp.ErrorNode('service-unavailable', typ='cancel'))
 
-          self.send(reply, False)
+          self.send(reply)
     elif body:
       if self.status == 'agreed' and self.polite:
         self.send('message acknowledged, thank you.')

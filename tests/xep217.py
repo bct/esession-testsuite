@@ -86,7 +86,7 @@ class FancySession(esession.ESession):
 
     self.status = 'initiated'
 
-    self.send(request, False)
+    self.send(request)
 
   # 4.3 esession response (bob)
   def bob_responds(self, request_form):
@@ -180,7 +180,7 @@ p: %s''' % (repr(self.d), repr(g), repr(self.y), repr(p)))
     self.form_b = ''.join(map(lambda el: c14n.c14n(el), x.getChildren()))
 
     feature.addChild(node=x)
-    self.send(response, False)
+    self.send(response)
 
   # 4.4 esession accept (alice)
   def alice_accepts(self, form):
@@ -246,7 +246,7 @@ p: %s''' % (repr(self.d), repr(g), repr(self.y), repr(p)))
     result.addChild(node=xmpp.DataField(name='mac', value=base64.b64encode(m_a)))
 
     feature.addChild(node=result)
-    self.send(accept, False)
+    self.send(accept)
     
     self.status = 'initiator-accepted'
  
@@ -370,7 +370,7 @@ your KM: %s''' % (repr(self.kc_s), repr(self.km_s), repr(self.kc_o), repr(self.k
 
     init.addChild(node=x)
 
-    self.send(response, False)
+    self.send(response)
 
     # destroy all copies of srs
 

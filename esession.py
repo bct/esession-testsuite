@@ -52,6 +52,7 @@ class ESession(session.Session):
   def send(self, msg):
     if isinstance(msg, str) or isinstance(msg, unicode):
       msg = xmpp.Message(body=msg)
+      msg.setType('chat')
 
     if self.enable_encryption:
       msg = self.encrypt_stanza(msg)
