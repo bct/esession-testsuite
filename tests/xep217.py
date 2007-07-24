@@ -161,12 +161,6 @@ class FancySession(esession.ESession):
     self.y = self.srand(2 ** (2 * n - 1), p - 1)
     self.d = self.powmod(g, self.y, p)
 
-    self.send('''d = g ** y mod p
-d: %s
-g: %s
-y: %s
-p: %s''' % (repr(self.d), repr(g), repr(self.y), repr(p)))
-
     to_add = { 'my_nonce': self.n_s, 'dhkeys': self.encode_mpi(self.d), 'counter': self.encode_mpi(self.c_o), 'nonce': self.n_o }
 
     for name in to_add:
@@ -242,6 +236,8 @@ p: %s''' % (repr(self.d), repr(g), repr(self.y), repr(p)))
 
     m_a = self.hmac(self.km_s, self.encode_mpi(old_c_s) + id_a)
 
+    self.send_sas(m_a, self.form_b)
+
     result.addChild(node=xmpp.DataField(name='identity', value=base64.b64encode(id_a)))
     result.addChild(node=xmpp.DataField(name='mac', value=base64.b64encode(m_a)))
 
@@ -279,18 +275,14 @@ p: %s''' % (repr(self.d), repr(g), repr(self.y), repr(p)))
 
     k = self.sha256(self.encode_mpi(self.powmod(e, self.y, p)))
 
-    self.send('''k = e ** y mod p
-k: %s 
-e: %s
-y: %s
-p: %s''' % (repr(k), repr(e), repr(self.y), repr(p)))
-
     self.kc_o, self.km_o, self.ks_o = self.generate_initiator_keys(k)
 
     # 4.5.2 verifying alice's identity
     id_a = base64.b64decode(form['identity'])
 
     m_a = base64.b64decode(form['mac'])
+
+    self.send_sas(m_a, self.form_b)
 
     failed = False
     try:
@@ -307,6 +299,7 @@ p: %s''' % (repr(k), repr(e), repr(self.y), repr(p)))
         # return <feature-not-implemented/>
         self.assert_correct_hmac(self.km_o, self.encode_mpi(self.c_o) + id_a, 'm_a', m_a)
       except AssertionError:
+        # it still failed, raise the original error
         raise AssertionError, original_failure_args
       else:
         raise AssertionError, 'The HMAC for M_A failed because you calculated it using the current value of C_A, rather than the value before you encrypted ID_A.'
@@ -339,14 +332,6 @@ p: %s''' % (repr(k), repr(e), repr(self.y), repr(p)))
     self.kc_s, self.km_s, self.ks_s = self.generate_responder_keys(k)
     self.kc_o, self.km_o, self.ks_o = self.generate_initiator_keys(k)
 
-    self.send('''final keys:
-
-my KC: %s
-my KM: %s
-
-your KC: %s
-your KM: %s''' % (repr(self.kc_s), repr(self.km_s), repr(self.kc_o), repr(self.km_o)))
-
     # 4.5.5
     if self.srs:
       srshash = self.hmac(self.srs, 'Shared Retained Secret')
@@ -360,7 +345,7 @@ your KM: %s''' % (repr(self.kc_s), repr(self.km_s), repr(self.kc_o), repr(self.k
     form_b2 = ''.join(map(lambda el: c14n.c14n(el), x.getChildren()))
 
     old_c_s = self.c_s
-    mac_b = self.hmac(self.n_o + self.n_s + self.encode_mpi(self.d) + self.form_b + form_b2, self.ks_s)
+    mac_b = self.hmac(self.ks_s, self.n_o + self.n_s + self.encode_mpi(self.d) + self.form_b + form_b2)
     id_b = self.encrypt(mac_b)
 
     m_b = self.hmac(self.km_s, self.encode_mpi(old_c_s) + id_b)
@@ -412,18 +397,19 @@ your KM: %s''' % (repr(self.kc_s), repr(self.km_s), repr(self.kc_o), repr(self.k
 
     # 4.6.2 Verifying Bob's Identity
 
+    m_b = base64.b64decode(form['mac'])
     id_b = base64.b64decode(form['identity'])
 
-    m_b = self.hmac(self.encode_mpi(self.c_o) + id_b, self.km_o)
+    self.assert_correct_hmac(self.km_o, self.encode_mpi(self.c_o) + id_b, 'm_b', m_b)
 
     mac_b = self.decrypt(id_b)
 
-    form_b2 = ''.join(map(lambda el: c14n.c14n(el), form.getChildren()))
+    macable_children = filter(lambda x: x.getVar() not in ('mac', 'identity'), form.getChildren())
+    form_b2 = ''.join(map(lambda el: c14n.c14n(el), macable_children))
 
-    mac_b = self.hmac(self.n_s + self.n_o + self.encode_mpi(self.d) + self.form_b + form_b2, self.ks_o)
+    self.assert_correct_hmac(self.ks_o, self.n_s + self.n_o + self.encode_mpi(self.d) + self.form_b + form_b2, 'mac_b', mac_b)
 
     # Note: If Alice discovers an error then she SHOULD ignore any encrypted content she received in the stanza.
-    # XXX check for MAC equality?
 
     self.status = 'encrypted'
     self.enable_encryption = True
@@ -435,10 +421,16 @@ your KM: %s''' % (repr(self.kc_s), repr(self.km_s), repr(self.kc_o), repr(self.k
 
     assert calculated == expected, '''HMAC mismatch for the %s field.
 
-key: %s
+HMAC key: %s
+
 content: %s
+
 expected: %s
+
 calculated: %s'''  % (repr(name), repr(key), repr(content), repr(expected), repr(calculated))
+
+  def send_sas(self, m_a, form_b):
+    self.send('''calculated SAS: %s''' % self.sas_28x5(m_a, form_b))
 
   def show_help(self, msg):
     self.send('''this bot tests XEP-0217.

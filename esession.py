@@ -217,3 +217,16 @@ class ESession(session.Session):
 
   def decrypt(self, ciphertext):
     return self.decrypter.decrypt(ciphertext)
+
+  base28_chr = "acdefghikmopqruvwxy123456789"
+
+  def sas_28x5(self, m_a, form_b):
+    sha = self.sha256(m_a + form_b + 'Short Authentication String')
+    lsb24 = self.decode_mpi(sha[-3:])
+    return self.base28(lsb24)
+
+  def base28(self, n):
+    if n >= 28:
+      return self.base28(n / 28) + self.base28_chr[n % 28]
+    else:
+      return self.base28_chr[n]
