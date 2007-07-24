@@ -7,13 +7,10 @@ class FancySession(session.Session):
   def show_help(self, msg):
     self.send("""this particular testbot tries to tell you something about your XEP-0201 (Best Practices for Message Threads) implementation.
 
-different types of messages are handled differently. unless noted otherwise, you should be able to send either a message[@type='normal'] or a message[@type='chat'] and have me respond via the same method.
-
-'help': this message
 'newthread': i send a message starting a new session
 'status': details about the sessions i have with your resource
-'run': (chat only) i run through a series of scenarios to check your client's compliance
-<any other message>: details about what thread your message belongs to""")
+'run': i run through a series of scenarios to check your client's compliance
+<any message>: details about what thread your message belongs to""")
 
   def do_newthread(self, msg):
     new_sess = self.dispatcher.start_new_session(self.my_jid, self.eir_jid, self.__class__)
