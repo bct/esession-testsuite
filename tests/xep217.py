@@ -11,7 +11,7 @@ import c14n
 
 import base64
 
-class FancySession(esession.ESession):
+class SimplifiedE2E(esession.ESession):
   def __init__(self, **args):
     esession.ESession.__init__(self, **args)
 
@@ -19,6 +19,22 @@ class FancySession(esession.ESession):
     self.es = {}
 
     self.status = 'waiting'
+
+    self.verbose = False
+
+  def set_verbose(self, msg):
+    if not self.verbose:
+      self.verbose = True
+      self.send('''ok, being verbose.''')
+    else:
+      self.send('''already verbose!''')
+
+  def set_terse(self, msg):
+    if self.verbose:
+      self.verbose = False
+      self.send('''ok, being terse.''')
+    else:
+      self.send('''already terse!''')
 
   def make_dhhash(self, modp):
     p = dh.primes[modp]
@@ -214,6 +230,9 @@ class FancySession(esession.ESession):
 
     self.k = self.sha256(self.encode_mpi(self.powmod(self.d, x, p)))
 
+    if self.verbose:
+      self.send('''k = %s''' % repr(self.k))
+
     # 4.4.2 generating session keys
     self.kc_s, self.km_s, self.ks_s = self.generate_initiator_keys(self.k)
     
@@ -274,6 +293,9 @@ class FancySession(esession.ESession):
     assert e < (p - 1), "your 'e' is bigger than than the prime 'p' we agreed upon."
 
     k = self.sha256(self.encode_mpi(self.powmod(e, self.y, p)))
+    
+    if self.verbose:
+      self.send('''k = %s''' % repr(k))
 
     self.kc_o, self.km_o, self.ks_o = self.generate_initiator_keys(k)
 
@@ -323,14 +345,26 @@ class FancySession(esession.ESession):
     # TODO: 4.5.3
 
     # 4.5.4 generating bob's final session keys
+
+    rshashes = [base64.b64decode(rshash) for rshash in form.getField('rshashes').getValues()]
+
+    if not rshashes:
+      self.send('''! even if we've never spoken before, you should throw some random values into the rshashes field.''')
+
     self.srs = ''
     oss = ''
 
     k = self.sha256(k + self.srs + oss)
+    
+    if self.verbose:
+      self.send('''k = %s''' % repr(k))
 
     # XXX I can skip generating ks_o here
     self.kc_s, self.km_s, self.ks_s = self.generate_responder_keys(k)
     self.kc_o, self.km_o, self.ks_o = self.generate_initiator_keys(k)
+
+    if self.verbose:
+      self.send('''chosen SRS = %s''' % repr(self.srs))
 
     # 4.5.5
     if self.srs:
@@ -361,6 +395,9 @@ class FancySession(esession.ESession):
 
     self.srs = self.hmac(k, 'New Retained Secret')
 
+    if self.verbose:
+      self.send('''new SRS = %s''' % repr(self.srs))
+
     # destroy k
     self.status = 'encrypted'
     self.enable_encryption = True
@@ -382,11 +419,21 @@ class FancySession(esession.ESession):
 
     srs = ''
     oss = ''
+
+    if self.verbose:
+      self.send('''chosen SRS = %s''' % repr(srs))
+
     self.k = self.sha256(self.k + srs + oss)
+
+    if self.verbose:
+      self.send('''k = %s''' % repr(self.k))
 
     # Alice MUST destroy all her copies of the old retained secret (SRS) she was keeping for Bob's client, and calculate a new retained secret for this session:
 
     srs = self.hmac('New Retained Secret', self.k)
+
+    if self.verbose:
+      self.send('''new SRS = %s''' % repr(srs))
 
     # Alice MUST securely store the new value along with the retained secrets her client shares with Bob's other clients.
 
@@ -433,11 +480,14 @@ calculated: %s'''  % (repr(name), repr(key), repr(content), repr(expected), repr
     self.send('''calculated SAS: %s''' % self.sas_28x5(m_a, form_b))
 
   def show_help(self, msg):
-    self.send('''this bot tests XEP-0217.
+    self.send('''this bot tests XEP-0217 (Simplified Encrypted Session Negotiation).
 
-please attempt to initiate a XEP-0217 session with me.
+if you attempt to initiate a XEP-0217 session with me, i will respond.
 
-'begin' will have me attempt to initiate a session with you.''')
+'begin': i'll attempt to initiate a session with you.
+'verbose': give more details
+'terse': give fewer detalis
+''')
 
   def handle_message(self, msg):
     c = msg.getTag(name='c', namespace='http://www.xmpp.org/extensions/xep-0200.html#ns')
@@ -480,8 +530,10 @@ please attempt to initiate a XEP-0217 session with me.
         self.send('''received an encrypted message. 'help' for assistance.''')
       else:
         self.send('''received an unencrypted message. 'help' for assistance.''')
-  
+ 
   handlers = { 'help': show_help,
                'begin': alice_initiates,
+               'verbose': set_verbose,
+               'terse': set_terse,
       }
 
