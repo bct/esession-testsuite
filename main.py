@@ -16,6 +16,7 @@ jids = { 'xep155': xep155.SessionNegotiation,
          'xep200': xep200.FancySession,
          'xep201': xep201.FancySession,
          'xep217': xep217.SimplifiedE2E, 
+         'sigmai': sigmai.ThreeMessageSession 
                             }
 class TestSuite:
   def __init__(self, name, server, port, secret, handlers):
