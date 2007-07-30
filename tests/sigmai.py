@@ -36,21 +36,30 @@ class ThreeMessageSession(esession.ESession):
     else:
       self.send('''already terse!''')
 
-  def make_dhhash(self, modp):
-    p = dh.primes[modp]
-    g = dh.generators[modp]
+  def make_dhfield(self, modp_options, sigmai=False):
+    dhs = []
 
-    x = self.srand(2 ** (2 * self.n - 1), p - 1)
+    for modp in modp_options:
+      p = dh.primes[modp]
+      g = dh.generators[modp]
 
-    # XXX this may be a source of performance issues
-    e = self.powmod(g, x, p)
+      x = self.srand(2 ** (2 * self.n - 1), p - 1)
 
-    self.xes[modp] = x
-    self.es[modp] = e
+      # XXX this may be a source of performance issues
+      e = self.powmod(g, x, p)
 
-    He = self.sha256(self.encode_mpi(e))
+      self.xes[modp] = x
+      self.es[modp] = e
 
-    return base64.b64encode(He)
+      if sigmai:
+        dhs.append(base64.b64encode(e))
+        name = "dhkeys"
+      else:
+        He = self.sha256(self.encode_mpi(e))
+        dhs.append(base64.b64encode(He))
+        name = "dhhashes"
+    
+    return xmpp.DataField(name=name, typ='hidden', value=dhs)
 
   # 4.1 esession request (alice)
   def alice_initiates(self, msg):
@@ -93,8 +102,7 @@ class ThreeMessageSession(esession.ESession):
 
     x.addChild(node=xmpp.DataField(name='modp', typ='list-single', options=map(lambda x: [ None, x ], modp_options)))
 
-    dhhashes = map(lambda x: self.make_dhhash(x), modp_options)
-    x.addChild(node=xmpp.DataField(name='dhhashes', typ='hidden', value=dhhashes))
+    x.addChild(node=self.make_dhfield(modp_options))
 
     self.form_a = ''.join(map(lambda el: c14n.c14n(el), x.getChildren()))
 
