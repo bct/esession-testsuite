@@ -242,8 +242,15 @@ class SimplifiedE2E(esession.ESession):
     result.addChild(node=xmpp.DataField(name='nonce', value=base64.b64encode(self.n_o)))
     result.addChild(node=xmpp.DataField(name='dhkeys', value=base64.b64encode(self.encode_mpi(e))))
 
-    # TODO: store and return rshashes, or at least randomly generate some
-    result.addChild(node=xmpp.DataField(name='rshashes', value=[]))
+    secrets = self.dispatcher.list_secrets(self.my_jid, self.eir_jid)
+    rshashes = [self.hmac(self.n_s, rs) for rs in secrets]
+
+    # XXX add random fake rshashes
+
+    rshashes.sort()
+
+    rshashes = [base64.b64encode(rshash) for rshash in rshashes]
+    result.addChild(node=xmpp.DataField(name='rshashes', value=rshashes))
 
     # 4.4.3 hiding alice's identity
     form_a2 = ''.join(map(lambda el: c14n.c14n(el), result.getChildren()))
@@ -345,16 +352,28 @@ class SimplifiedE2E(esession.ESession):
     # TODO: 4.5.3
 
     # 4.5.4 generating bob's final session keys
+    srs = ''
+
+    secrets = self.dispatcher.list_secrets(self.my_jid, self.eir_jid)
+    terminated = self.dispatcher.srs['terminated']
 
     rshashes = [base64.b64decode(rshash) for rshash in form.getField('rshashes').getValues()]
 
     if not rshashes:
       self.send('''! even if we've never spoken before, you should throw some random values into the rshashes field.''')
 
-    self.srs = ''
+    for secret in terminated:
+      if self.hmac(self.n_o, secret) in rshashes:
+        self.send('''! you offered secret %s that should have been destroyed''' % repr(secret))
+
+    for secret in secrets:
+      if self.hmac(self.n_o, secret) in rshashes:
+        srs = secret
+        break
+
     oss = ''
 
-    k = self.sha256(k + self.srs + oss)
+    k = self.sha256(k + srs + oss)
     
     if self.verbose:
       self.send('''k = %s''' % repr(k))
@@ -364,11 +383,11 @@ class SimplifiedE2E(esession.ESession):
     self.kc_o, self.km_o, self.ks_o = self.generate_initiator_keys(k)
 
     if self.verbose:
-      self.send('''chosen SRS = %s''' % repr(self.srs))
+      self.send('''chosen SRS = %s''' % repr(srs))
 
     # 4.5.5
-    if self.srs:
-      srshash = self.hmac(self.srs, 'Shared Retained Secret')
+    if srs:
+      srshash = self.hmac(srs, 'Shared Retained Secret')
     else:
       srshash = self.random_bytes(32)
 
@@ -391,12 +410,7 @@ class SimplifiedE2E(esession.ESession):
 
     self.send(response)
 
-    # destroy all copies of srs
-
-    self.srs = self.hmac(k, 'New Retained Secret')
-
-    if self.verbose:
-      self.send('''new SRS = %s''' % repr(self.srs))
+    self.do_srs(k, srs)
 
     # destroy k
     self.status = 'encrypted'
@@ -413,11 +427,16 @@ class SimplifiedE2E(esession.ESession):
     assert form['FORM_TYPE'] == 'urn:xmpp:ssn', 'FORM_TYPE was %s, should have been %s' % (repr(form['FORM_TYPE'], repr('urn:xmpp:ssn')))
 
     # 4.6.1 generating alice's final session keys
-    # Alice MUST identify the shared retained secret (SRS) by selecting from her client's list of the secrets it retained from sessions with Bob's clients (the most recent secret for each of the clients he has used to negotiate ESessions with Alice's client).
-
-    # Alice does this by using each secret in the list in turn as the key to calculate the HMAC (with SHA256) of the string "Shared Retained Secret", and comparing the calculated value with the value in the 'srshash' field she received from Bob (see Sending Bob's Identity). Once she finds a match, and has confirmed that the secret has not expired (because it is older than an implementation-defined period of time), then she has found the SRS.
-
     srs = ''
+
+    secrets = self.dispatcher.list_secrets(self.my_jid, self.eir_jid)
+    srshash = base64.b64decode(form['srshash'])
+
+    for secret in secrets:
+      if self.hmac(secret, 'Shared Retained Secret') == srshash:
+        srs = secret
+        break
+
     oss = ''
 
     if self.verbose:
@@ -430,10 +449,7 @@ class SimplifiedE2E(esession.ESession):
 
     # Alice MUST destroy all her copies of the old retained secret (SRS) she was keeping for Bob's client, and calculate a new retained secret for this session:
 
-    srs = self.hmac('New Retained Secret', self.k)
-
-    if self.verbose:
-      self.send('''new SRS = %s''' % repr(srs))
+    self.do_srs(self.k, srs)
 
     # Alice MUST securely store the new value along with the retained secrets her client shares with Bob's other clients.
 
@@ -488,6 +504,17 @@ if you attempt to initiate a XEP-0217 session with me, i will respond.
 'verbose': give more details
 'terse': give fewer detalis
 ''')
+  
+  def do_srs(self, k, old_srs):
+    new_srs = self.hmac(k, 'New Retained Secret')
+
+    if self.verbose:
+      self.send('''new SRS = %s''' % repr(new_srs))
+
+    if old_srs:
+      self.dispatcher.replace_secret(self.my_jid, self.eir_jid, old_srs, new_srs)
+    else:
+      self.dispatcher.save_new_secret(self.my_jid, self.eir_jid, new_srs)
 
   def handle_message(self, msg):
     c = msg.getTag(name='c', namespace='http://www.xmpp.org/extensions/xep-0200.html#ns')

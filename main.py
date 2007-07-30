@@ -15,7 +15,7 @@ import sys
 jids = { 'xep155': xep155.SessionNegotiation,
          'xep200': xep200.FancySession,
          'xep201': xep201.FancySession,
-         'xep217': xep217.FancySession, 
+         'xep217': xep217.SimplifiedE2E, 
                             }
 class TestSuite:
   def __init__(self, name, server, port, secret, handlers):
@@ -28,6 +28,33 @@ class TestSuite:
     self.conn = client.Component(name)
 
     self.sessions = {}
+ 
+    # retained secret storage:
+
+    # terminated: [terminated_secrets],
+    # [my_jid]:
+    #   [eir_jid]: [secrets]
+    self.srs = { 'terminated': [] }
+
+  def list_secrets(self, my_jid, eir_jid):
+    try:
+      return self.srs[my_jid][eir_jid]
+    except KeyError:
+      return []
+
+  def replace_secret(self, my_jid, eir_jid, old_srs, new_srs):
+    self.srs['terminated'].append(old_srs)
+    pos = self.srs[my_jid][eir_jid].index(old_srs)
+    self.srs[my_jid][eir_jid][pos] = new_srs
+
+  def save_new_secret(self, my_jid, eir_jid, srs):
+    if not my_jid in self.srs:
+      self.srs[my_jid] = {}
+
+    if not eir_jid in self.srs[my_jid]:
+      self.srs[my_jid][eir_jid] = []
+
+    self.srs[my_jid][eir_jid].append(srs)
 
   def xmpp_connect(self):
     self.conn.connect((self.server,self.port))
