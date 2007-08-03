@@ -204,16 +204,9 @@ class ThreeMessageSession(esession.ESession):
 
       # K MUST be securely destroyed, unless it will be used later to generate the final shared secret
 
-      pubkey_b = ''
+      for datafield in self.make_bobs_identity(x, self.d, True):
+        x.addChild(node=datafield)
 
-      old_c_s = self.c_s
-      mac_b = self.hmac(self.ks_s, self.n_o + self.n_s + self.encode_mpi(d) + pubkey_b + self.form_b)
-      id_b = self.encrypt(mac_b)
-
-      m_b = self.hmac(self.km_s, self.encode_mpi(old_c_s) + id_b)
-
-      x.addChild(node=xmpp.DataField(name="identity", value=base64.b64encode(id_b))
-      x.addChild(node=xmpp.DataField(name="mac", value=base64.b64encode(m_b))
     else:
       self.He = base64.b64decode(request_form.getField('dhhashes').getValues()[group_order].encode("utf8"))
 
@@ -393,16 +386,8 @@ class ThreeMessageSession(esession.ESession):
     x.addChild(node=xmpp.DataField(name='nonce', value=base64.b64encode(self.n_o)))
     x.addChild(node=xmpp.DataField(name='srshash', value=base64.b64encode(srshash)))
 
-    form_b2 = ''.join(map(lambda el: c14n.c14n(el), x.getChildren()))
-
-    old_c_s = self.c_s
-    mac_b = self.hmac(self.ks_s, self.n_o + self.n_s + self.encode_mpi(self.d) + self.form_b + form_b2)
-    id_b = self.encrypt(mac_b)
-
-    m_b = self.hmac(self.km_s, self.encode_mpi(old_c_s) + id_b)
-
-    x.addChild(node=xmpp.DataField(name='identity', value=base64.b64encode(id_b)))
-    x.addChild(node=xmpp.DataField(name='mac', value=base64.b64encode(m_b)))
+    for datafield in self.make_bobs_identity(x, self.d, False):
+      x.addChild(node=datafield)
 
     init.addChild(node=x)
 
@@ -530,6 +515,26 @@ class ThreeMessageSession(esession.ESession):
 
     self.assert_correct_hmac(self.ks_o, content, 'mac_b', mac_b)
   
+  def make_bobs_identity(self, form, d, sigmai):
+    pubkey_b = ''
+
+    c7lform = ''.join(map(lambda el: c14n.c14n(el), form.getChildren()))
+    content = self.n_o + self.n_s + self.encode_mpi(d) + pubkey_b
+
+    if self.sigmai:
+      content += c7lform
+    else:
+      content += self.form_b + c7lform
+
+    old_c_s = self.c_s
+    mac_b = self.hmac(self.ks_s, content)
+    id_b = self.encrypt(mac_b)
+
+    m_b = self.hmac(self.km_s, self.encode_mpi(old_c_s) + id_b)
+
+    return (xmpp.DataField(name="identity", value=base64.b64encode(id_b)), \
+            xmpp.DataField(name="mac", value=base64.b64encode(m_b)))
+
   def c7lize_mac_id(self, form):
     kids = form.getChildren()
     macable = filter(lambda x: x.getVar() not in ('mac', 'identity'), kids)
