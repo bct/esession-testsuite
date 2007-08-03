@@ -168,11 +168,11 @@ class ThreeMessageSession(esession.ESession):
       elif name == 'my_nonce':
         self.n_o = base64.b64decode(field.getValue())
       elif name == 'dhhashes':
-        pass
+        self.sigmai = False
+      elif name == 'dhkeys':
+        self.sigmai = True
       else:
         pass # XXX we don't support this field
-
-    self.He = base64.b64decode(request_form.getField('dhhashes').getValues()[group_order].encode("utf8"))
 
     n = 128 # number of bits
     bytes = int(n / 8)
@@ -184,7 +184,7 @@ class ThreeMessageSession(esession.ESession):
 
     self.y = self.srand(2 ** (2 * n - 1), p - 1)
     self.d = self.powmod(g, self.y, p)
-
+    
     to_add = { 'my_nonce': self.n_s, 'dhkeys': self.encode_mpi(self.d), 'counter': self.encode_mpi(self.c_o), 'nonce': self.n_o }
 
     for name in to_add:
@@ -193,13 +193,35 @@ class ThreeMessageSession(esession.ESession):
 
     self.form_a = ''.join(map(lambda el: c14n.c14n(el), request_form.getChildren()))
 
-    self.status = 'responded'
-    
     self.form_b = ''.join(map(lambda el: c14n.c14n(el), x.getChildren()))
+
+    if self.sigmai:
+      e = base64.b64decode(request_form.getField('dhkeys').getValues()[group_order].encode("utf8"))
+      k = self.get_shared_secret(e, y, p) 
+    
+      self.kc_s, self.km_s, self.ks_s = self.generate_responder_keys(k)
+      self.kc_o, self.km_o, self.ks_o = self.generate_initiator_keys(k)
+
+      # K MUST be securely destroyed, unless it will be used later to generate the final shared secret
+
+      pubkey_b = ''
+
+      old_c_s = self.c_s
+      mac_b = self.hmac(self.ks_s, self.n_o + self.n_s + self.encode_mpi(d) + pubkey_b + self.form_b)
+      id_b = self.encrypt(mac_b)
+
+      m_b = self.hmac(self.km_s, self.encode_mpi(old_c_s) + id_b)
+
+      x.addChild(node=xmpp.DataField(name="identity", value=base64.b64encode(id_b))
+      x.addChild(node=xmpp.DataField(name="mac", value=base64.b64encode(m_b))
+    else:
+      self.He = base64.b64decode(request_form.getField('dhhashes').getValues()[group_order].encode("utf8"))
 
     feature.addChild(node=x)
     self.send(response)
 
+    self.status = 'responded'
+    
   # 4.4 esession accept (alice)
   def alice_accepts(self, form):
     # 4.4.1 diffie-hellman preparation
@@ -244,21 +266,25 @@ class ThreeMessageSession(esession.ESession):
     # 4.4.2 generating session keys
     self.kc_s, self.km_s, self.ks_s = self.generate_initiator_keys(self.k)
     
+    if self.sigmai:
+      self.kc_o, self.km_o, self.ks_o = self.generate_responder_keys(self.k)
+      self.verify_bobs_identity(form, True)
+    else:
+      secrets = self.dispatcher.list_secrets(self.my_jid, self.eir_jid)
+      rshashes = [self.hmac(self.n_s, rs) for rs in secrets]
+
+      # XXX add random fake rshashes
+
+      rshashes.sort()
+
+      rshashes = [base64.b64encode(rshash) for rshash in rshashes]
+      result.addChild(node=xmpp.DataField(name='rshashes', value=rshashes))
+      result.addChild(node=xmpp.DataField(name='dhkeys', value=base64.b64encode(self.encode_mpi(e))))
+
     # MUST securely destroy K unless it will be used later to generate the final shared secret
     result.addChild(node=xmpp.DataField(name='FORM_TYPE', value='urn:xmpp:ssn'))
     result.addChild(node=xmpp.DataField(name='accept', value='1'))
     result.addChild(node=xmpp.DataField(name='nonce', value=base64.b64encode(self.n_o)))
-    result.addChild(node=xmpp.DataField(name='dhkeys', value=base64.b64encode(self.encode_mpi(e))))
-
-    secrets = self.dispatcher.list_secrets(self.my_jid, self.eir_jid)
-    rshashes = [self.hmac(self.n_s, rs) for rs in secrets]
-
-    # XXX add random fake rshashes
-
-    rshashes.sort()
-
-    rshashes = [base64.b64encode(rshash) for rshash in rshashes]
-    result.addChild(node=xmpp.DataField(name='rshashes', value=rshashes))
 
     # 4.4.3 hiding alice's identity
     form_a2 = ''.join(map(lambda el: c14n.c14n(el), result.getChildren()))
@@ -303,59 +329,23 @@ class ThreeMessageSession(esession.ESession):
     # return <feature-not-implemented/>
     assert self.sha256(self.encode_mpi(e)) == self.He, "your 'e' doesn't match the hash you sent previously (SHA256(%s) != %s)" % (repr(self.encode_mpi(e)), self.He)
 
-    # return <feature-not-implemented/> 
-    assert e > 1, "your 'e' should be bigger than 1."
-    assert e < (p - 1), "your 'e' is bigger than than the prime 'p' we agreed upon."
+    k = self.get_shared_secret(e, self.y, p)
 
-    k = self.sha256(self.encode_mpi(self.powmod(e, self.y, p)))
-    
     if self.verbose:
       self.send('''k = %s''' % repr(k))
 
     self.kc_o, self.km_o, self.ks_o = self.generate_initiator_keys(k)
 
     # 4.5.2 verifying alice's identity
-    id_a = base64.b64decode(form['identity'])
+    self.verify_alices_identity(form)
 
-    m_a = base64.b64decode(form['mac'])
+    if self.sigmai:
+      self.status = 'encrypted'
+      self.enable_encryption = True
 
-    self.send_sas(m_a, self.form_b)
+      self.send("Congratulations! If you can read this, we've successfully negotiated a 3-message encrypted session.")
 
-    failed = False
-    try:
-      # return <feature-not-implemented/>
-      self.assert_correct_hmac(self.km_o, self.encode_mpi(self.c_o) + id_a, 'm_a', m_a)
-    except AssertionError, args:
-      failed = True
-      original_failure_args = args
-    
-    mac_a = self.decrypt(id_a)
-
-    if failed:
-      try:
-        # return <feature-not-implemented/>
-        self.assert_correct_hmac(self.km_o, self.encode_mpi(self.c_o) + id_a, 'm_a', m_a)
-      except AssertionError:
-        # it still failed, raise the original error
-        raise AssertionError, original_failure_args
-      else:
-        raise AssertionError, 'The HMAC for M_A failed because you calculated it using the current value of C_A, rather than the value before you encrypted ID_A.'
-
-    form_a2_with_extras = ''.join(map(lambda el: c14n.c14n(el), form.getChildren()))
-
-    macable_children = filter(lambda x: x.getVar() not in ('mac', 'identity'), form.getChildren())
-    form_a2 = ''.join(map(lambda el: c14n.c14n(el), macable_children))
-
-    try:
-      # return <feature-not-implemented/>
-      self.assert_correct_hmac(self.ks_o, self.n_s + self.n_o + self.encode_mpi(e) + self.form_a + form_a2, 'mac_a', mac_a)
-    except AssertionError, args:
-      try:
-        self.assert_correct_hmac(self.ks_o, self.n_s + self.n_o + self.encode_mpi(e) + self.form_a + form_a2_with_extras, 'mac_a', mac_a)
-      except AssertionError, args2:
-        raise AssertionError, args
-      else:
-        raise AssertionError, 'The HMAC for mac_A failed because you included the <identity/> and <mac/> fields in the hashed content.'
+      return
 
     # TODO: 4.5.3
 
@@ -424,7 +414,7 @@ class ThreeMessageSession(esession.ESession):
     self.status = 'encrypted'
     self.enable_encryption = True
 
-    self.send("Congratulations! If you can read this, we've successfully negotiated an encrypted session.")
+    self.send("Congratulations! If you can read this, we've successfully negotiated a 4-message encrypted session.")
 
   # 4.6 final steps (alice)
   def final_steps_alice(self, form):
@@ -467,18 +457,7 @@ class ThreeMessageSession(esession.ESession):
     self.kc_o, self.km_o, self.ks_o = self.generate_responder_keys(self.k) 
 
     # 4.6.2 Verifying Bob's Identity
-
-    m_b = base64.b64decode(form['mac'])
-    id_b = base64.b64decode(form['identity'])
-
-    self.assert_correct_hmac(self.km_o, self.encode_mpi(self.c_o) + id_b, 'm_b', m_b)
-
-    mac_b = self.decrypt(id_b)
-
-    macable_children = filter(lambda x: x.getVar() not in ('mac', 'identity'), form.getChildren())
-    form_b2 = ''.join(map(lambda el: c14n.c14n(el), macable_children))
-
-    self.assert_correct_hmac(self.ks_o, self.n_s + self.n_o + self.encode_mpi(self.d) + self.form_b + form_b2, 'mac_b', mac_b)
+    self.verify_bobs_identity(form, False)
 
     # Note: If Alice discovers an error then she SHOULD ignore any encrypted content she received in the stanza.
 
@@ -486,6 +465,75 @@ class ThreeMessageSession(esession.ESession):
     self.enable_encryption = True
 
     self.send("Congratulations! If you can read this, we've successfully negotiated an encrypted session.")
+
+  def verify_alices_identity(self, form):
+    id_a = base64.b64decode(form['identity'])
+    m_a = base64.b64decode(form['mac'])
+
+    self.send_sas(m_a, self.form_b)
+
+    failed = False
+    try:
+      # return <feature-not-implemented/>
+      self.assert_correct_hmac(self.km_o, self.encode_mpi(self.c_o) + id_a, 'm_a', m_a)
+    except AssertionError, args:
+      failed = True
+      original_failure_args = args
+    
+    mac_a = self.decrypt(id_a)
+
+    if failed:
+      try:
+        # return <feature-not-implemented/>
+        self.assert_correct_hmac(self.km_o, self.encode_mpi(self.c_o) + id_a, 'm_a', m_a)
+      except AssertionError:
+        # it still failed, raise the original error
+        raise AssertionError, original_failure_args
+      else:
+        raise AssertionError, 'The HMAC for M_A failed because you calculated it using the current value of C_A, rather than the value before you encrypted ID_A.'
+
+    form_a2 = self.c7lize_mac_id(form)
+    prefix = self.n_s + self.n_o + self.encode_mpi(e) + self.form_a
+
+    try:
+      # return <feature-not-implemented/>
+      self.assert_correct_hmac(self.ks_o, prefix + form_a2, 'mac_a', mac_a)
+    except AssertionError, args:
+      try:
+        form_a2_with_extras = ''.join(map(lambda el: c14n.c14n(el), form.getChildren()))
+        self.assert_correct_hmac(self.ks_o, prefix + form_a2_with_extras, 'mac_a', mac_a)
+      except AssertionError, args2:
+        # it still failed, raise the original error
+        raise AssertionError, args
+      else:
+        raise AssertionError, 'The HMAC for mac_A failed because you included the <identity/> and <mac/> fields in the hashed content.'
+
+  def verify_bobs_identity(self, form, sigmai):
+    m_b = base64.b64decode(form['mac'])
+    id_b = base64.b64decode(form['identity'])
+
+    self.assert_correct_hmac(self.km_o, self.encode_mpi(self.c_o) + id_b, 'm_b', m_b)
+
+    mac_b = self.decrypt(id_b)
+    pubkey_b = ''
+
+    c7l_form = self.c7lize_mac_id(form)
+
+    content = self.n_s + self.n_o + self.encode_mpi(self.d) + pubkey_b
+
+    if sigmai:
+      form_b = c7l_form
+      content += form_b
+    else:
+      form_b2 = c7l_form
+      content += self.form_b + form_b2
+
+    self.assert_correct_hmac(self.ks_o, content, 'mac_b', mac_b)
+  
+  def c7lize_mac_id(self, form):
+    kids = form.getChildren()
+    macable = filter(lambda x: x.getVar() not in ('mac', 'identity'), kids)
+    return ''.join(map(lambda el: c14n.c14n(el), macable))
 
   def assert_correct_hmac(self, key, content, name, expected):
     calculated = self.hmac(key, content) # XXX stick the hash name in here
@@ -523,6 +571,13 @@ if you attempt to initiate a XEP-0217 session with me, i will respond.
       self.dispatcher.replace_secret(self.my_jid, self.eir_jid, old_srs, new_srs)
     else:
       self.dispatcher.save_new_secret(self.my_jid, self.eir_jid, new_srs)
+
+  def get_shared_secret(self, e, y, p):
+    # return <feature-not-implemented/>
+    assert e > 1, "your 'e' should be bigger than 1." # XXX it might not be named e
+    assert e < (p - 1), "your 'e' is bigger than than the prime 'p' we agreed upon."
+    
+    return self.sha256(self.encode_mpi(self.powmod(e, y, p)))
 
   def handle_message(self, msg):
     c = msg.getTag(name='c', namespace='http://www.xmpp.org/extensions/xep-0200.html#ns')
