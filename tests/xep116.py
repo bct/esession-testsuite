@@ -212,8 +212,6 @@ class EncryptedSessionNegotiation(esession.ESession):
 
     self.k = self.get_shared_secret(self.d, x, p)
 
-    self.form_b = ''.join(map(lambda el: c14n.c14n(el), form.getChildren()))
-
     accept = xmpp.Message()
     feature = accept.NT.feature
     feature.setNamespace(xmpp.NS_FEATURE)
@@ -241,6 +239,8 @@ class EncryptedSessionNegotiation(esession.ESession):
       rshashes = [base64.b64encode(rshash) for rshash in rshashes]
       result.addChild(node=xmpp.DataField(name='rshashes', value=rshashes))
       result.addChild(node=xmpp.DataField(name='dhkeys', value=base64.b64encode(self.encode_mpi(e))))
+    
+      self.form_b = ''.join(map(lambda el: c14n.c14n(el), form.getChildren()))
 
     # MUST securely destroy K unless it will be used later to generate the final shared secret
     result.addChild(node=xmpp.DataField(name='FORM_TYPE', value='urn:xmpp:ssn'))
@@ -464,8 +464,8 @@ class EncryptedSessionNegotiation(esession.ESession):
     content = self.n_s + self.n_o + self.encode_mpi(self.d) + pubkey_b
 
     if sigmai:
-      form_b = c7l_form
-      content += form_b
+      self.form_b = c7l_form
+      content += self.form_b
     else:
       form_b2 = c7l_form
       content += self.form_b + form_b2
