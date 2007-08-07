@@ -279,19 +279,8 @@ class ThreeMessageSession(esession.ESession):
     result.addChild(node=xmpp.DataField(name='nonce', value=base64.b64encode(self.n_o)))
 
     # 4.4.3 hiding alice's identity
-    form_a2 = ''.join(map(lambda el: c14n.c14n(el), result.getChildren()))
-
-    old_c_s = self.c_s
-
-    mac_a = self.hmac(self.ks_s, self.n_o + self.n_s + self.encode_mpi(e) + self.form_a + form_a2)
-    id_a = self.encrypt(mac_a)
-
-    m_a = self.hmac(self.km_s, self.encode_mpi(old_c_s) + id_a)
-
-    self.send_sas(m_a, self.form_b)
-
-    result.addChild(node=xmpp.DataField(name='identity', value=base64.b64encode(id_a)))
-    result.addChild(node=xmpp.DataField(name='mac', value=base64.b64encode(m_a)))
+    for datafield in self.make_alices_identity(result, e):
+      result.addChild(node=datafield)
 
     feature.addChild(node=result)
     self.send(accept)
@@ -513,6 +502,21 @@ class ThreeMessageSession(esession.ESession):
       content += self.form_b + form_b2
 
     self.assert_correct_hmac(self.ks_o, content, 'mac_b', mac_b)
+
+  def make_alices_identity(self, form, e):
+    form_a2 = ''.join(map(lambda el: c14n.c14n(el), form.getChildren()))
+
+    old_c_s = self.c_s
+
+    mac_a = self.hmac(self.ks_s, self.n_o + self.n_s + self.encode_mpi(e) + self.form_a + form_a2)
+    id_a = self.encrypt(mac_a)
+
+    m_a = self.hmac(self.km_s, self.encode_mpi(old_c_s) + id_a)
+
+    self.send_sas(m_a, self.form_b)
+
+    return (xmpp.DataField(name='identity', value=base64.b64encode(id_a)), \
+            xmpp.DataField(name='mac', value=base64.b64encode(m_a)))
   
   def make_bobs_identity(self, form, d, sigmai):
     pubkey_b = ''
