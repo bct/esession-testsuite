@@ -230,3 +230,35 @@ class ESession(session.Session):
       return self.base28(n / 28) + self.base28_chr[n % 28]
     else:
       return self.base28_chr[n]
+
+  # this stuff is more implementation-specific
+
+  def make_dhfield(self, modp_options, sigmai=False):
+    dhs = []
+
+    for modp in modp_options:
+      p = dh.primes[modp]
+      g = dh.generators[modp]
+
+      x = self.srand(2 ** (2 * self.n - 1), p - 1)
+
+      # XXX this may be a source of performance issues
+      e = self.powmod(g, x, p)
+
+      self.xes[modp] = x
+      self.es[modp] = e
+
+      if sigmai:
+        dhs.append(base64.b64encode(e))
+        name = "dhkeys"
+      else:
+        He = self.sha256(self.encode_mpi(e))
+        dhs.append(base64.b64encode(He))
+        name = "dhhashes"
+
+    return xmpp.DataField(name=name, typ='hidden', value=dhs)
+
+  def c7lize_mac_id(self, form):
+    kids = form.getChildren()
+    macable = filter(lambda x: x.getVar() not in ('mac', 'identity'), kids)
+    return ''.join(map(lambda el: c14n.c14n(el), macable))
