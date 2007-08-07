@@ -267,7 +267,6 @@ class ThreeMessageSession(esession.ESession):
       rshashes = [self.hmac(self.n_s, rs) for rs in secrets]
 
       # XXX add random fake rshashes
-
       rshashes.sort()
 
       rshashes = [base64.b64encode(rshash) for rshash in rshashes]
@@ -557,13 +556,12 @@ calculated: %s'''  % (repr(name), repr(key), repr(content), repr(expected), repr
     self.send('''calculated SAS: %s''' % self.sas_28x5(m_a, form_b))
 
   def show_help(self, msg):
-    self.send('''this bot tests XEP-0217 (Simplified Encrypted Session Negotiation).
+    self.send('''this bot tests XEP-0116 Three Message (SIGMA-I) Negotiation.
 
-if you attempt to initiate a XEP-0217 session with me, i will respond.
+if you attempt to initiate a XEP-0116 Three Message Negotation with me, i will respond.
 
-'begin': i'll attempt to initiate a session with you.
 'verbose': give more details
-'terse': give fewer detalis
+'terse': give fewer details
 ''')
   
   def do_srs(self, k, old_srs):

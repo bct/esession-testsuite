@@ -502,7 +502,7 @@ if you attempt to initiate a XEP-0217 session with me, i will respond.
 
 'begin': i'll attempt to initiate a session with you.
 'verbose': give more details
-'terse': give fewer detalis
+'terse': give fewer details
 ''')
   
   def do_srs(self, k, old_srs):
