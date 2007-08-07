@@ -234,10 +234,8 @@ class ThreeMessageSession(esession.ESession):
     x = self.xes[mod_p]
     e = self.es[mod_p]
 
-    # Return a <not-acceptable/> error
-    assert self.d > 1, "the value you gave for 'd' wasn't greater than 1."
-    assert self.d < (p - 1), "the value you gave for 'd' wasn't less than p - 1."
-    
+    self.k = self.get_shared_secret(self.d, x, p)
+
     self.form_b = ''.join(map(lambda el: c14n.c14n(el), form.getChildren()))
 
     accept = xmpp.Message()
@@ -250,11 +248,6 @@ class ThreeMessageSession(esession.ESession):
     self.c_o = self.c_s ^ (2 ** (self.n - 1))
 
     self.n_o = base64.b64decode(form['my_nonce'])
-
-    self.k = self.sha256(self.encode_mpi(self.powmod(self.d, x, p)))
-
-    if self.verbose:
-      self.send('''k = %s''' % repr(self.k))
 
     # 4.4.2 generating session keys
     self.kc_s, self.km_s, self.ks_s = self.generate_initiator_keys(self.k)
@@ -311,9 +304,6 @@ class ThreeMessageSession(esession.ESession):
     assert self.sha256(self.encode_mpi(e)) == self.He, "your 'e' doesn't match the hash you sent previously (SHA256(%s) != %s)" % (repr(self.encode_mpi(e)), self.He)
 
     k = self.get_shared_secret(e, self.y, p)
-
-    if self.verbose:
-      self.send('''k = %s''' % repr(k))
 
     self.kc_o, self.km_o, self.ks_o = self.generate_initiator_keys(k)
 
@@ -580,11 +570,21 @@ if you attempt to initiate a XEP-0116 Three Message Negotation with me, i will r
       self.dispatcher.save_new_secret(self.my_jid, self.eir_jid, new_srs)
 
   def get_shared_secret(self, e, y, p):
+    if self.status == 'initiated':
+      name = 'd'
+    else:
+      name = 'e'
+
     # return <feature-not-implemented/>
-    assert e > 1, "your 'e' should be bigger than 1." # XXX it might not be named e
-    assert e < (p - 1), "your 'e' is bigger than than the prime 'p' we agreed upon."
+    assert e > 1, ("your '%s' should be bigger than 1." % name)
+    assert e < (p - 1), ("your '%s' is bigger than p - 1." % name)
+
+    k = self.sha256(self.encode_mpi(self.powmod(e, y, p)))
+
+    if self.verbose:
+      self.send('''k = %s''' % repr(k))
     
-    return self.sha256(self.encode_mpi(self.powmod(e, y, p)))
+    return k
 
   def handle_message(self, msg):
     c = msg.getTag(name='c', namespace='http://www.xmpp.org/extensions/xep-0200.html#ns')
