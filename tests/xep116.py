@@ -171,8 +171,9 @@ class EncryptedSessionNegotiation(esession.ESession):
     self.form_b = ''.join(map(lambda el: c14n.c14n(el), x.getChildren()))
 
     if self.sigmai:
-      e = base64.b64decode(request_form.getField('dhkeys').getValues()[group_order].encode("utf8"))
-      k = self.get_shared_secret(e, y, p)
+      bin = request_form.getField('dhkeys').getValues()[group_order].encode("utf8")
+      self.e = self.decode_mpi(base64.b64decode(bin))
+      k = self.get_shared_secret(self.e, self.y, p)
 
       self.kc_s, self.km_s, self.ks_s = self.generate_responder_keys(k)
       self.kc_o, self.km_o, self.ks_o = self.generate_initiator_keys(k)
@@ -264,12 +265,26 @@ class EncryptedSessionNegotiation(esession.ESession):
 
     x = xmpp.DataForm(typ='result')
 
-    for field in ('FORM_TYPE', 'accept', 'nonce', 'dhkeys', 'rshashes', 'identity', 'mac'):
+    for field in ('FORM_TYPE', 'accept', 'nonce', 'identity', 'mac'):
       assert field in form.asDict(), "your acceptance form didn't have a %s field" % repr(field)
 
     assert form.getType() == 'result', 'x/@type was %s, should have been "result"' % repr(form.getType())
     assert form['FORM_TYPE'] == 'urn:xmpp:ssn', 'FORM_TYPE was %s, should have been %s' % (repr(form['FORM_TYPE'], repr('urn:xmpp:ssn')))
     assert form['accept'] in ('1', 'true'), "'accept' was %s, should have been '1' or 'true'" % repr(form['accept'])
+
+    # 4.5.2 verifying alice's identity
+    self.verify_alices_identity(form, self.e)
+
+    if self.sigmai:
+      self.status = 'encrypted'
+      self.enable_encryption = True
+
+      self.send("Congratulations! If you can read this, we've successfully negotiated a 3-message encrypted session.")
+
+      return
+
+    for field in ('dhkeys', 'rshashes'):
+      assert field in form.asDict(), "your acceptance form didn't have a %s field and this is not a 3 message negotiation" % repr(field)
 
     # 4.5.1 generating provisory session keys
     e = self.decode_mpi(base64.b64decode(form['dhkeys']))
@@ -281,17 +296,6 @@ class EncryptedSessionNegotiation(esession.ESession):
     k = self.get_shared_secret(e, self.y, p)
 
     self.kc_o, self.km_o, self.ks_o = self.generate_initiator_keys(k)
-
-    # 4.5.2 verifying alice's identity
-    self.verify_alices_identity(form)
-
-    if self.sigmai:
-      self.status = 'encrypted'
-      self.enable_encryption = True
-
-      self.send("Congratulations! If you can read this, we've successfully negotiated a 3-message encrypted session.")
-
-      return
 
     # TODO: 4.5.3
 
@@ -404,7 +408,7 @@ class EncryptedSessionNegotiation(esession.ESession):
 
     self.send("Congratulations! If you can read this, we've successfully negotiated an encrypted session.")
 
-  def verify_alices_identity(self, form):
+  def verify_alices_identity(self, form, e):
     id_a = base64.b64decode(form['identity'])
     m_a = base64.b64decode(form['mac'])
 

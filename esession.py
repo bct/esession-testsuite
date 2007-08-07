@@ -7,6 +7,8 @@ import base64
 import os
 import math
 
+import c14n
+
 from Crypto.Cipher import AES 
 from Crypto.Hash import HMAC, SHA256
 
@@ -249,7 +251,7 @@ class ESession(session.Session):
       self.es[modp] = e
 
       if sigmai:
-        dhs.append(base64.b64encode(e))
+        dhs.append(base64.b64encode(self.encode_mpi(e)))
         name = "dhkeys"
       else:
         He = self.sha256(self.encode_mpi(e))
