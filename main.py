@@ -12,6 +12,9 @@ from tests import *
 
 import sys
 
+import os
+import Crypto.PublicKey.RSA
+
 jids = { 'xep155': xep155.SessionNegotiation,
          'xep200': xep200.FancySession,
          'xep201': xep201.FancySession,
@@ -36,6 +39,9 @@ class TestSuite:
     # [my_jid]:
     #   [eir_jid]: [secrets]
     self.srs = { 'terminated': [] }
+
+    # XXX os.urandom is not a cryptographic PRNG
+    self.pubkey = Crypto.PublicKey.RSA.generate(384, os.urandom)
 
   def list_secrets(self, my_jid, eir_jid):
     try:

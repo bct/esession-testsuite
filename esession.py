@@ -156,11 +156,19 @@ class ESession(session.Session):
   def hmac(self, key, content):
     return HMAC.new(key, content, self.hash_alg).digest()
 
-  # i think i need this to be more generic to implement other hashes
   def sha256(self, string):
     sh = SHA256.new()
     sh.update(string)
     return sh.digest()
+
+  def hash(self, string):
+    # XXX support other hash types
+    return self.sha256(string)
+
+  def sign(self, string):
+    if self.sign_algs == 'http://www.w3.org/2000/09/xmldsig#rsa-sha256':
+      hash = self.sha256(string)
+      return self.encode_mpi(self.my_pubkey.sign(hash, '')[0])
 
   def generate_initiator_keys(self, k):
     return (self.hmac(k, 'Initiator Cipher Key'),
