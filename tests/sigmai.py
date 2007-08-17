@@ -15,6 +15,11 @@ if you attempt to initiate a XEP-0116 Three Message Negotation with me, i will r
 
     self.send(msg)
 
+  def bob_responds(self, form):
+    assert 'dhkeys' in form.asDict() and not 'dhhashes' in form.asDict(), 'i only respond to 3-message negotiations.'
+
+    tests.xep116.EncryptedSessionNegotiation.bob_responds(self, form)
+
   def alice_initiates(self, msg):
     tests.xep116.EncryptedSessionNegotiation.alice_initiates(self, msg)
 

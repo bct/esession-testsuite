@@ -11,6 +11,8 @@ import c14n
 
 import base64
 
+from Crypto.PublicKey import RSA
+
 class EncryptedSessionNegotiation(esession.ESession):
   def __init__(self, **args):
     esession.ESession.__init__(self, **args)
@@ -86,7 +88,7 @@ class EncryptedSessionNegotiation(esession.ESession):
 
     x.addChild(node=self.make_dhfield(modp_options))
 
-    self.form_a = ''.join(map(lambda el: c14n.c14n(el), x.getChildren()))
+    self.form_s = ''.join(map(lambda el: c14n.c14n(el), x.getChildren()))
 
     feature.addChild(node=x)
 
@@ -111,8 +113,8 @@ class EncryptedSessionNegotiation(esession.ESession):
                     'ver': '1.0',
                 'sas_algs': 'sas28x5' }
 
-    self.init_pubkey = None
-    self.resp_pubkey = None
+    self.recv_pubkey = None
+    self.send_pubkey = None
 
     for name, field in map(lambda name: (name, request_form.getField(name)), request_form.asDict().keys()):
       options = map(lambda x: x[1], field.getOptions())
@@ -156,20 +158,20 @@ class EncryptedSessionNegotiation(esession.ESession):
         self.sigmai = True
       elif name == 'init_pubkey':
         if 'key' in options:
-          self.init_pubkey = 'key'
+          self.recv_pubkey = 'key'
         elif not 'none' in options:
           raise 'unsupported init_pubkey'
 
-        x.addChild(node=xmpp.DataField(name='init_pubkey', value=self.init_pubkey))
+        x.addChild(node=xmpp.DataField(name='init_pubkey', value=self.recv_pubkey))
       elif name == 'resp_pubkey':
         for o in ('key', 'hash'):
           if o in options:
-            self.resp_pubkey = o
+            self.send_pubkey = o
 
-        if not self.resp_pubkey and not 'none' in options:
+        if not self.send_pubkey and not 'none' in options:
           raise 'unsupported resp_pubkey'
 
-        x.addChild(node=xmpp.DataField(name='resp_pubkey', value=self.resp_pubkey))
+        x.addChild(node=xmpp.DataField(name='resp_pubkey', value=self.send_pubkey))
       elif name == 'sign_algs':
         if 'http://www.w3.org/2000/09/xmldsig#rsa-sha256' in options:
           self.sign_algs = 'http://www.w3.org/2000/09/xmldsig#rsa-sha256'
@@ -197,9 +199,9 @@ class EncryptedSessionNegotiation(esession.ESession):
       b64ed = base64.b64encode(to_add[name])
       x.addChild(node=xmpp.DataField(name=name, value=b64ed))
 
-    self.form_a = ''.join(map(lambda el: c14n.c14n(el), request_form.getChildren()))
+    self.form_o = ''.join(map(lambda el: c14n.c14n(el), request_form.getChildren()))
 
-    self.form_b = ''.join(map(lambda el: c14n.c14n(el), x.getChildren()))
+    self.form_s = ''.join(map(lambda el: c14n.c14n(el), x.getChildren()))
 
     if self.sigmai:
       bin = request_form.getField('dhkeys').getValues()[group_order].encode("utf8")
@@ -259,7 +261,7 @@ class EncryptedSessionNegotiation(esession.ESession):
 
     if self.sigmai:
       self.kc_o, self.km_o, self.ks_o = self.generate_responder_keys(self.k)
-      self.verify_bobs_identity(form, True)
+      self.verify_identity(form, self.d, True, 'b')
     else:
       secrets = self.dispatcher.list_secrets(self.my_jid, self.eir_jid)
       rshashes = [self.hmac(self.n_s, rs) for rs in secrets]
@@ -271,7 +273,7 @@ class EncryptedSessionNegotiation(esession.ESession):
       result.addChild(node=xmpp.DataField(name='rshashes', value=rshashes))
       result.addChild(node=xmpp.DataField(name='dhkeys', value=base64.b64encode(self.encode_mpi(e))))
     
-      self.form_b = ''.join(map(lambda el: c14n.c14n(el), form.getChildren()))
+      self.form_o = ''.join(map(lambda el: c14n.c14n(el), form.getChildren()))
 
     # MUST securely destroy K unless it will be used later to generate the final shared secret
     result.addChild(node=xmpp.DataField(name='FORM_TYPE', value='urn:xmpp:ssn'))
@@ -304,7 +306,7 @@ class EncryptedSessionNegotiation(esession.ESession):
     assert form['accept'] in ('1', 'true'), "'accept' was %s, should have been '1' or 'true'" % repr(form['accept'])
 
     if self.sigmai:
-      self.verify_alices_identity(form, self.e)
+      self.verify_identity(form, self.e, True, 'a')
 
       self.status = 'encrypted'
       self.enable_encryption = True
@@ -326,8 +328,8 @@ class EncryptedSessionNegotiation(esession.ESession):
     k = self.get_shared_secret(e, self.y, p)
 
     self.kc_o, self.km_o, self.ks_o = self.generate_initiator_keys(k)
-    
-    self.verify_alices_identity(form, e)
+
+    self.verify_identity(form, e, False, 'a')
 
     # TODO: 4.5.3
 
@@ -431,7 +433,7 @@ class EncryptedSessionNegotiation(esession.ESession):
     self.kc_o, self.km_o, self.ks_o = self.generate_responder_keys(self.k)
 
     # 4.6.2 Verifying Bob's Identity
-    self.verify_bobs_identity(form, False)
+    self.verify_identity(form, self.d, False, 'b')
 
     # Note: If Alice discovers an error then she SHOULD ignore any encrypted content she received in the stanza.
 
@@ -440,60 +442,40 @@ class EncryptedSessionNegotiation(esession.ESession):
 
     self.send("Congratulations! If you can read this, we've successfully negotiated an encrypted session.")
 
-  def verify_alices_identity(self, form, e):
-    id_a = base64.b64decode(form['identity'])
-    m_a = base64.b64decode(form['mac'])
+  def verify_identity(self, form, dh_i, sigmai, i_o):
+    id_o = base64.b64decode(form['identity'])
+    m_o = base64.b64decode(form['mac'])
 
-    self.send_sas(m_a, self.form_b)
+    if i_o == 'a':
+      self.send_sas(m_o, self.form_s)
 
     failed = False
     try:
       # return <feature-not-implemented/>
-      self.assert_correct_hmac(self.km_o, self.encode_mpi(self.c_o) + id_a, 'm_a', m_a)
+      self.assert_correct_hmac(self.km_o, self.encode_mpi(self.c_o) + id_o, 'm_' + i_o, m_o)
     except AssertionError, args:
       failed = True
       original_failure_args = args
 
-    mac_a = self.decrypt(id_a)
+    plaintext = self.decrypt(id_o)
 
     if failed:
       try:
         # return <feature-not-implemented/>
-        self.assert_correct_hmac(self.km_o, self.encode_mpi(self.c_o) + id_a, 'm_a', m_a)
+        self.assert_correct_hmac(self.km_o, self.encode_mpi(self.c_o) + id_o, 'm_' + i_o, m_o)
       except AssertionError:
         # it still failed, raise the original error
         raise AssertionError, original_failure_args
       else:
-        raise AssertionError, 'The HMAC for M_A failed because you calculated it using the current value of C_A, rather than the value before you encrypted ID_A.'
+        raise AssertionError, 'The HMAC for m_%s failed because you calculated it using the current value of c_%s, rather than the value before you encrypted %s.' % (i_o, i_o, i_o)
 
-    form_a2 = self.c7lize_mac_id(form)
-    prefix = self.n_s + self.n_o + self.encode_mpi(e) + self.form_a
-
-    try:
-      # return <feature-not-implemented/>
-      self.assert_correct_hmac(self.ks_o, prefix + form_a2, 'mac_a', mac_a)
-    except AssertionError, args:
+    if self.recv_pubkey:
       try:
-        form_a2_with_extras = ''.join(map(lambda el: c14n.c14n(el), form.getChildren()))
-        self.assert_correct_hmac(self.ks_o, prefix + form_a2_with_extras, 'mac_a', mac_a)
-      except AssertionError, args2:
-        # it still failed, raise the original error
-        raise AssertionError, args
-      else:
-        raise AssertionError, 'The HMAC for mac_A failed because you included the <identity/> and <mac/> fields in the hashed content.'
+        parsed = xmpp.Node(node='<node>' + plaintext + '</node>')
+      except:
+        raise AssertionError, 'the following value of id_%s was not parseable as XML: %s' % (i_o, repr(plaintext))
 
-  def verify_bobs_identity(self, form, sigmai):
-    m_b = base64.b64decode(form['mac'])
-    id_b = base64.b64decode(form['identity'])
-
-    self.assert_correct_hmac(self.km_o, self.encode_mpi(self.c_o) + id_b, 'm_b', m_b)
-
-    if self.resp_pubkey:
-      plaintext = self.decrypt(id_b)
-   
-      parsed = xmpp.Node(node='<node>' + plaintext + '</node>')
-
-      if self.resp_pubkey == 'hash':
+      if self.recv_pubkey == 'hash':
         fingerprint = parsed.getTagData('fingerprint')
 
         # XXX find stored pubkey or terminate
@@ -503,35 +485,39 @@ class EncryptedSessionNegotiation(esession.ESession):
           keyvalue = parsed.getTag(name='RSAKeyValue', namespace='http://www.w3.org/2000/09/xmldsig#')
 
           n, e = map(lambda x: self.decode_mpi(base64.b64decode(keyvalue.getTagData(x))), ('Modulus', 'Exponent'))
-          eir_key = RSA.construct((n,e))
+          eir_key = RSA.construct((n,long(e)))
 
-          pubkey_b = c14n.c14n(keyvalue)
+          pubkey_o = c14n.c14n(keyvalue)
         else:
           # XXX DSA, etc.
           raise "unimplemented"
 
-      signature = parsed.getTagData(name='SignatureValue', namespace='http://www.w3.org/2000/09/xmldsig#')
+      enc_sig = parsed.getTag(name='SignatureValue', namespace='http://www.w3.org/2000/09/xmldsig#').getData()
+      signature = (self.decode_mpi(base64.b64decode(enc_sig)),)
+
     else:
-      mac_b = self.decrypt(id_b)
-      pubkey_b = ''
+      mac_o = plaintext
+      pubkey_o = ''
 
     c7l_form = self.c7lize_mac_id(form)
 
-    content = self.n_s + self.n_o + self.encode_mpi(self.d) + pubkey_b
+    content = self.n_s + self.n_o + self.encode_mpi(dh_i) + pubkey_o
+  
+    if not sigmai:
+      content += self.form_o
 
-    if sigmai:
-      self.form_b = c7l_form
-      content += self.form_b
+    content += c7l_form
+
+    if self.recv_pubkey:
+      mac_o_calculated = self.hmac(self.ks_o, content)
+
+      if self.sign_algs == 'http://www.w3.org/2000/09/xmldsig#rsa-sha256':
+        hash = self.sha256(mac_o_calculated)
+
+      assert eir_key.verify(hash, signature), 'signature could not be verified!\nhashed: %s' % repr(content)
     else:
-      form_b2 = c7l_form
-      content += self.form_b + form_b2
-
-    if self.resp_pubkey:
-      hash = self.hmac(self.ks_o, content)
-
-      assert eir_key.verify(hash, signature), 'signature not verified!'
-    else:
-      self.assert_correct_hmac(self.ks_o, content, 'mac_b', mac_b)
+      # return <feature-not-implemented/>
+      self.assert_correct_hmac(self.ks_o, prefix + c7l_form, 'mac_' + i_o, mac_o)
 
   def my_keyvalue(self):
     if self.sign_algs == 'http://www.w3.org/2000/09/xmldsig#rsa-sha256':
@@ -541,22 +527,22 @@ class EncryptedSessionNegotiation(esession.ESession):
       return '''<RSAKeyValue xmlns="http://www.w3.org/2000/09/xmldsig#"><Modulus>%s</Modulus><Exponent>%s</Exponent></RSAKeyValue>''' % tuple(cb_fields)
 
   def make_alices_identity(self, form, e):
-    form_a2 = ''.join(map(lambda el: c14n.c14n(el), form.getChildren()))
+    form_s2 = ''.join(map(lambda el: c14n.c14n(el), form.getChildren()))
 
     old_c_s = self.c_s
 
-    mac_a = self.hmac(self.ks_s, self.n_o + self.n_s + self.encode_mpi(e) + self.form_a + form_a2)
+    mac_a = self.hmac(self.ks_s, self.n_o + self.n_s + self.encode_mpi(e) + self.form_s + form_s2)
     id_a = self.encrypt(mac_a)
 
     m_a = self.hmac(self.km_s, self.encode_mpi(old_c_s) + id_a)
 
-    self.send_sas(m_a, self.form_b)
+    self.send_sas(m_a, self.form_o)
 
     return (xmpp.DataField(name='identity', value=base64.b64encode(id_a)), \
             xmpp.DataField(name='mac', value=base64.b64encode(m_a)))
 
   def make_bobs_identity(self, form, d, sigmai):
-    if self.resp_pubkey:
+    if self.send_pubkey:
       pubkey_b = self.my_keyvalue() 
     else:
       pubkey_b = ''
@@ -567,16 +553,16 @@ class EncryptedSessionNegotiation(esession.ESession):
     if self.sigmai:
       content += c7lform
     else:
-      content += self.form_b + c7lform
+      content += self.form_s + c7lform
 
     old_c_s = self.c_s
     mac_b = self.hmac(self.ks_s, content)
     
-    if self.resp_pubkey:
+    if self.send_pubkey:
       signature = self.sign(mac_b)
       sign_b = '<SignatureValue xmlns="http://www.w3.org/2000/09/xmldsig#">%s</SignatureValue>' % base64.b64encode(signature)
 
-      if self.resp_pubkey == 'hash':
+      if self.send_pubkey == 'hash':
         b64ed = base64.b64encode(self.hash(pubkey_b))
         pubkey_b = '<fingerprint>%s</fingerprint>' % b64ed
 
