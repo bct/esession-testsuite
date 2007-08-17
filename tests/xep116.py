@@ -213,7 +213,7 @@ class EncryptedSessionNegotiation(esession.ESession):
 
       # K MUST be securely destroyed, unless it will be used later to generate the final shared secret
 
-      for datafield in self.make_bobs_identity(x, self.d, True):
+      for datafield in self.make_identity(x, self.d):
         x.addChild(node=datafield)
 
     else:
@@ -281,7 +281,7 @@ class EncryptedSessionNegotiation(esession.ESession):
     result.addChild(node=xmpp.DataField(name='nonce', value=base64.b64encode(self.n_o)))
 
     # 4.4.3 hiding alice's identity
-    for datafield in self.make_alices_identity(result, e):
+    for datafield in self.make_identity(result, e):
       result.addChild(node=datafield)
 
     feature.addChild(node=result)
@@ -377,7 +377,7 @@ class EncryptedSessionNegotiation(esession.ESession):
     x.addChild(node=xmpp.DataField(name='nonce', value=base64.b64encode(self.n_o)))
     x.addChild(node=xmpp.DataField(name='srshash', value=base64.b64encode(srshash)))
 
-    for datafield in self.make_bobs_identity(x, self.d, False):
+    for datafield in self.make_identity(x, self.d):
       x.addChild(node=datafield)
 
     init.addChild(node=x)
@@ -467,7 +467,7 @@ class EncryptedSessionNegotiation(esession.ESession):
         # it still failed, raise the original error
         raise AssertionError, original_failure_args
       else:
-        raise AssertionError, 'The HMAC for m_%s failed because you calculated it using the current value of c_%s, rather than the value before you encrypted %s.' % (i_o, i_o, i_o)
+        raise AssertionError, 'The HMAC for m_%s failed because you calculated it using the current value of c_%s, rather than the value before you encrypted id_%s.' % (i_o, i_o, i_o)
 
     if self.recv_pubkey:
       try:
@@ -519,61 +519,46 @@ class EncryptedSessionNegotiation(esession.ESession):
       # return <feature-not-implemented/>
       self.assert_correct_hmac(self.ks_o, prefix + c7l_form, 'mac_' + i_o, mac_o)
 
-  def my_keyvalue(self):
-    if self.sign_algs == 'http://www.w3.org/2000/09/xmldsig#rsa-sha256':
-      fields = (self.my_pubkey.n, self.my_pubkey.e)
-      cb_fields = map(lambda f: base64.b64encode(self.encode_mpi(f)), fields)
-
-      return '''<RSAKeyValue xmlns="http://www.w3.org/2000/09/xmldsig#"><Modulus>%s</Modulus><Exponent>%s</Exponent></RSAKeyValue>''' % tuple(cb_fields)
-
-  def make_alices_identity(self, form, e):
-    form_s2 = ''.join(map(lambda el: c14n.c14n(el), form.getChildren()))
-
-    old_c_s = self.c_s
-
-    mac_a = self.hmac(self.ks_s, self.n_o + self.n_s + self.encode_mpi(e) + self.form_s + form_s2)
-    id_a = self.encrypt(mac_a)
-
-    m_a = self.hmac(self.km_s, self.encode_mpi(old_c_s) + id_a)
-
-    self.send_sas(m_a, self.form_o)
-
-    return (xmpp.DataField(name='identity', value=base64.b64encode(id_a)), \
-            xmpp.DataField(name='mac', value=base64.b64encode(m_a)))
-
-  def make_bobs_identity(self, form, d, sigmai):
+  def make_identity(self, form, dh_i):
     if self.send_pubkey:
-      pubkey_b = self.my_keyvalue() 
+      if self.sign_algs == 'http://www.w3.org/2000/09/xmldsig#rsa-sha256':
+        fields = (self.my_pubkey.n, self.my_pubkey.e)
+        cb_fields = map(lambda f: base64.b64encode(self.encode_mpi(f)), fields)
+
+        pubkey_s = '<RSAKeyValue xmlns="http://www.w3.org/2000/09/xmldsig#"><Modulus>%s</Modulus><Exponent>%s</Exponent></RSAKeyValue>' % tuple(cb_fields)
     else:
-      pubkey_b = ''
+      pubkey_s = ''
 
     c7lform = ''.join(map(lambda el: c14n.c14n(el), form.getChildren()))
-    content = self.n_o + self.n_s + self.encode_mpi(d) + pubkey_b
+    content = self.n_o + self.n_s + self.encode_mpi(dh_i) + pubkey_s
 
-    if self.sigmai:
-      content += c7lform
-    else:
+    if form.getType() == 'result':
       content += self.form_s + c7lform
+    else:
+      content += c7lform
 
     old_c_s = self.c_s
-    mac_b = self.hmac(self.ks_s, content)
+    mac_s = self.hmac(self.ks_s, content)
     
     if self.send_pubkey:
-      signature = self.sign(mac_b)
-      sign_b = '<SignatureValue xmlns="http://www.w3.org/2000/09/xmldsig#">%s</SignatureValue>' % base64.b64encode(signature)
+      signature = self.sign(mac_s)
+      sign_s = '<SignatureValue xmlns="http://www.w3.org/2000/09/xmldsig#">%s</SignatureValue>' % base64.b64encode(signature)
 
       if self.send_pubkey == 'hash':
-        b64ed = base64.b64encode(self.hash(pubkey_b))
-        pubkey_b = '<fingerprint>%s</fingerprint>' % b64ed
+        b64ed = base64.b64encode(self.hash(pubkey_s))
+        pubkey_s = '<fingerprint>%s</fingerprint>' % b64ed
 
-      id_b = self.encrypt(pubkey_b + sign_b)
+      id_s = self.encrypt(pubkey_s + sign_s)
     else:
-      id_b = self.encrypt(mac_b)
+      id_s = self.encrypt(mac_s)
 
-    m_b = self.hmac(self.km_s, self.encode_mpi(old_c_s) + id_b)
+    m_s = self.hmac(self.km_s, self.encode_mpi(old_c_s) + id_s)
 
-    return (xmpp.DataField(name="identity", value=base64.b64encode(id_b)), \
-            xmpp.DataField(name="mac", value=base64.b64encode(m_b)))
+    if self.status == 'initiated':
+      self.send_sas(m_a, self.form_o)
+
+    return (xmpp.DataField(name="identity", value=base64.b64encode(id_s)), \
+            xmpp.DataField(name="mac", value=base64.b64encode(m_s)))
 
   def assert_correct_hmac(self, key, content, name, expected):
     calculated = self.hmac(key, content) # XXX stick the hash name in here
