@@ -79,7 +79,7 @@ class SessionNegotiation(session.Session):
       return
 
     for key in self.handlers.keys():
-      if key in body:
+      if body and key in body:
         self.handlers[key](self, msg)
         return
 
