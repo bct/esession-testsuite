@@ -226,11 +226,10 @@ class EncryptedSessionNegotiation(esession.ESession):
 
   # 4.4 esession accept (alice)
   def alice_accepts(self, form):
-    # 4.4.1 diffie-hellman preparation
-
     for field in ('FORM_TYPE', 'accept', 'logging', 'disclosure', 'security', 'crypt_algs', 'hash_algs', 'compress', 'stanzas', 'init_pubkey', 'resp_pubkey', 'ver', 'rekey_freq', 'sas_algs', 'my_nonce', 'dhkeys', 'nonce', 'counter'):
       assert field in form.asDict(), "your response form didn't have a %s field" % repr(field)
 
+    # 4.4.1 diffie-hellman preparation
     # Verify that the ESession options selected by Bob are acceptable
     assert form.getType() == 'submit', 'x/@type was %s, should have been "submit"' % repr(form.getType())
     assert form['FORM_TYPE'] == 'urn:xmpp:ssn', 'FORM_TYPE was %s, should have been %s' % (repr(form['FORM_TYPE'], repr('urn:xmpp:ssn')))
@@ -604,7 +603,14 @@ calculated: %s'''  % (repr(name), repr(key), repr(content), repr(expected), repr
 
     return k
 
+  def terminate(self):
+    self.status = 'waiting'
+
   def handle_message(self, msg):
+    if not msg.T.thread:
+      self.send('''your message did not contain a thread id, ignoring it''')
+      return
+
     c = msg.getTag(name='c', namespace='http://www.xmpp.org/extensions/xep-0200.html#ns')
 
     if c:
@@ -629,6 +635,19 @@ calculated: %s'''  % (repr(name), repr(key), repr(content), repr(expected), repr
         if self.status == 'waiting':
           self.bob_responds(form)
         elif self.status == 'initiated':
+          not_acceptable = map(lambda x: x['var'], msg.T.error.T.feature.getChildren())
+
+          if not_acceptable:
+            res = '''ending negotiation because your client said I didn't offer acceptable values for these fields:
+
+'''
+            for f in not_acceptable:
+              res += '- ' + f
+
+            self.send(res)
+            self.terminate()
+            return
+
           self.alice_accepts(form)
         elif self.status == 'responded':
           self.bob_accepts(form)

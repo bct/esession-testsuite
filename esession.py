@@ -12,6 +12,8 @@ import c14n
 from Crypto.Cipher import AES 
 from Crypto.Hash import HMAC, SHA256
 
+import dh
+
 class DecryptionError(RuntimeError):
   pass
 
