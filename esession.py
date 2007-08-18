@@ -132,14 +132,14 @@ class ESession(session.Session):
     # contents of <c>, minus <mac>, minus whitespace
     macable = ''.join(map(str, filter(lambda x: x.getName() != 'mac', c.getChildren())))
 
+    if not (self.km_o and self.kc_o and self.c_o):
+      raise DecryptionError, "encryption keys aren't set yet!"
+
     received_mac = base64.b64decode(c.getTagData('mac'))
     calculated_mac = self.hmac(self.km_o, macable + self.encode_mpi_with_padding(self.c_o))
 
     if not calculated_mac == received_mac:
       raise BadSignature #, received_mac, calculated_mac
-
-    if not (self.km_o and self.kc_o and self.c_o):
-      raise DecryptionError, "encryption keys aren't set yet!"
 
     m_final = base64.b64decode(c.getTagData('data'))
     m_compressed = self.decrypt(m_final)
