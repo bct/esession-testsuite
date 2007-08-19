@@ -20,8 +20,8 @@ if you attempt to initiate a XEP-0116 Three Message Negotation with me, i will r
 
     tests.xep116.EncryptedSessionNegotiation.bob_responds(self, form)
 
-  def alice_initiates(self, msg):
-    tests.xep116.EncryptedSessionNegotiation.alice_initiates(self, msg)
+#  def alice_initiates(self, msg):
+#    tests.xep116.EncryptedSessionNegotiation.alice_initiates(self, msg)
 
   def set_verbose(self, msg):
     tests.xep116.EncryptedSessionNegotiation.set_verbose(self, msg)
@@ -30,7 +30,7 @@ if you attempt to initiate a XEP-0116 Three Message Negotation with me, i will r
     tests.xep116.EncryptedSessionNegotiation.set_terse(self, msg)
 
   handlers = { 'help': show_help,
-               'begin': alice_initiates,
+#               'begin': alice_initiates,
                'verbose': set_verbose,
                'terse': set_terse,
       }

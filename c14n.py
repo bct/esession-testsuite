@@ -28,9 +28,11 @@ def c14n(node):
 		s = s + "</" + node.name + ">"
 	return s.encode('utf-8')
 
+def c7l_children(element):
+  return ''.join(map(lambda c: c14n(c), element.getChildren()))
+
 def normalise_attr(val):
 	return val.replace('&', '&amp;').replace('<', '&lt;').replace('"', '&quot;').replace('\t', '&#x9;').replace('\n', '&#xA;').replace('\r', '&#xD;')
 
 def normalise_text(val):
 	return val.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('\r', '&#xD;')
-

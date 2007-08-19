@@ -13,6 +13,8 @@ import base64
 
 from Crypto.PublicKey import RSA
 
+XmlDsig = 'http://www.w3.org/2000/09/xmldsig#'
+
 class EncryptedSessionNegotiation(esession.ESession):
   def __init__(self, **args):
     esession.ESession.__init__(self, **args)
@@ -41,42 +43,48 @@ class EncryptedSessionNegotiation(esession.ESession):
       self.send('''already terse!''')
 
   # 4.1 esession request (alice)
-  def alice_initiates(self, msg):
+  def alice_initiates(self, msg, extra_options={}):
     request = xmpp.Message()
     feature = request.NT.feature
     feature.setNamespace(xmpp.NS_FEATURE)
 
     x = xmpp.DataForm(typ='form')
 
-    x.addChild(node=xmpp.DataField(name='FORM_TYPE', value='urn:xmpp:ssn', typ='hidden'))
-    x.addChild(node=xmpp.DataField(name='accept', value='1', typ='boolean', required=True))
+    required = [ 'accept', 'logging', 'disclosure', 'security' ]
 
+    options = { 'FORM_TYPE': 'urn:xmpp:ssn',
+                'accept': '1',
     # this field is incorrectly called 'otr' in XEPs 0116 and 0217
     # unsupported options: 'mustnot'
-    x.addChild(node=xmpp.DataField(name='logging', typ='list-single', options=['may'], required=True))
-
+                'logging': ['may'],
     # unsupported options: 'disabled', 'enabled'
-    x.addChild(node=xmpp.DataField(name='disclosure', typ='list-single', options=['never'], required=True))
-    x.addChild(node=xmpp.DataField(name='security', typ='list-single', options=['e2e'], required=True))
-    x.addChild(node=xmpp.DataField(name='crypt_algs', value='aes128-ctr', typ='hidden'))
-    x.addChild(node=xmpp.DataField(name='hash_algs', value='sha256', typ='hidden'))
-    x.addChild(node=xmpp.DataField(name='compress', value='none', typ='hidden'))
+                'disclosure': ['never'],
+                'security': ['e2e'],
+                'crypt_algs': 'aes128-ctr',
+                'hash_algs': 'sha256',
+                'compress': 'none',
+                'sign_algs': XmlDsig + 'rsa-sha256',
+                'init_pubkey': ['none', 'key', 'hash'],
+    # we don't store remote keys for now, so make them send it every time
+                'init_pubkey': ['none', 'key'],
+                'ver': '1.0',
+                'rekey_freq': '4294967295',
+                'sas_algs': 'sas28x5'
+              }
+
+    options.update(extra_options)
+
+    for name in options:
+      value = options[name]
+      if isinstance(value, list):
+        node = xmpp.DataField(name=name, typ='list-single', options=value, required=(name in required))
+      else:
+        node = xmpp.DataField(name=name, typ='hidden', value=value, required=(name in required))
+
+      x.addChild(node=node)
 
     # unsupported options: 'iq', 'presence'
     x.addChild(node=xmpp.DataField(name='stanzas', typ='list-multi', options=['message']))
-
-    x.addChild(node=xmpp.DataField(name='sign_algs', value='http://www.w3.org/2000/09/xmldsig#rsa-sha256', typ='hidden'))
-
-    x.addChild(node=xmpp.DataField(name='init_pubkey', options=['none', 'key', 'hash'], typ='list-single'))
-
-    # we don't store remote keys for now, so make them send it every time
-    x.addChild(node=xmpp.DataField(name='resp_pubkey', options=['none', 'key'], typ='list-single'))
-
-    x.addChild(node=xmpp.DataField(name='ver', value='1.0', typ='hidden'))
-
-    x.addChild(node=xmpp.DataField(name='rekey_freq', value='4294967295', typ='hidden'))
-
-    x.addChild(node=xmpp.DataField(name='sas_algs', value='sas28x5', typ='hidden'))
 
     self.n_s = self.generate_nonce()
 
@@ -86,10 +94,12 @@ class EncryptedSessionNegotiation(esession.ESession):
 
     x.addChild(node=xmpp.DataField(name='modp', typ='list-single', options=map(lambda x: [ None, x ], modp_options)))
 
-    x.addChild(node=self.make_dhfield(modp_options))
+    # XXX implement sigmai initiation
+    self.sigmai = False
+    x.addChild(node=self.make_dhfield(modp_options, self.sigmai))
 
-    self.form_s = ''.join(map(lambda el: c14n.c14n(el), x.getChildren()))
-
+    self.form_s = c14n.c7l_children(x)
+    
     feature.addChild(node=x)
 
     self.status = 'initiated'
@@ -97,7 +107,7 @@ class EncryptedSessionNegotiation(esession.ESession):
     self.send(request)
 
   # 4.3 esession response (bob)
-  def bob_responds(self, request_form):
+  def bob_responds(self, request_form, extra_fixed = {}):
     response = xmpp.Message()
     feature = response.NT.feature
     feature.setNamespace(xmpp.NS_FEATURE)
@@ -112,6 +122,8 @@ class EncryptedSessionNegotiation(esession.ESession):
                 'stanzas': 'message',
                     'ver': '1.0',
                 'sas_algs': 'sas28x5' }
+
+    fixed.update(extra_fixed)
 
     self.recv_pubkey = None
     self.send_pubkey = None
@@ -234,6 +246,15 @@ class EncryptedSessionNegotiation(esession.ESession):
     assert form.getType() == 'submit', 'x/@type was %s, should have been "submit"' % repr(form.getType())
     assert form['FORM_TYPE'] == 'urn:xmpp:ssn', 'FORM_TYPE was %s, should have been %s' % (repr(form['FORM_TYPE'], repr('urn:xmpp:ssn')))
     assert form['accept'] in ('1', 'true'), "'accept' was %s, should have been '1' or 'true'" % repr(form['accept'])
+
+    self.send_pubkey = form['init_pubkey']
+    self.recv_pubkey = form['resp_pubkey']
+
+    if self.send_pubkey == 'none':
+      self.send_pubkey = None
+
+    if self.recv_pubkey == 'none':
+      self.recv_pubkey = None
 
     self.d = self.decode_mpi(base64.b64decode(form['dhkeys']))
 
@@ -450,7 +471,6 @@ class EncryptedSessionNegotiation(esession.ESession):
 
     failed = False
     try:
-      # return <feature-not-implemented/>
       self.assert_correct_hmac(self.km_o, self.encode_mpi(self.c_o) + id_o, 'm_' + i_o, m_o)
     except AssertionError, args:
       failed = True
@@ -460,7 +480,6 @@ class EncryptedSessionNegotiation(esession.ESession):
 
     if failed:
       try:
-        # return <feature-not-implemented/>
         self.assert_correct_hmac(self.km_o, self.encode_mpi(self.c_o) + id_o, 'm_' + i_o, m_o)
       except AssertionError:
         # it still failed, raise the original error
@@ -515,8 +534,7 @@ class EncryptedSessionNegotiation(esession.ESession):
 
       assert eir_key.verify(hash, signature), 'signature could not be verified!\nhashed: %s' % repr(content)
     else:
-      # return <feature-not-implemented/>
-      self.assert_correct_hmac(self.ks_o, prefix + c7l_form, 'mac_' + i_o, mac_o)
+      self.assert_correct_hmac(self.ks_o, content, 'mac_' + i_o, mac_o)
 
   def make_identity(self, form, dh_i):
     if self.send_pubkey:
@@ -554,14 +572,15 @@ class EncryptedSessionNegotiation(esession.ESession):
     m_s = self.hmac(self.km_s, self.encode_mpi(old_c_s) + id_s)
 
     if self.status == 'initiated':
-      self.send_sas(m_a, self.form_o)
+      self.send_sas(m_s, self.form_o)
 
     return (xmpp.DataField(name="identity", value=base64.b64encode(id_s)), \
             xmpp.DataField(name="mac", value=base64.b64encode(m_s)))
 
   def assert_correct_hmac(self, key, content, name, expected):
-    calculated = self.hmac(key, content) # XXX stick the hash name in here
+    calculated = self.hmac(key, content)
 
+    # XXX <feature-not-implemented>
     assert calculated == expected, '''HMAC mismatch for the %s field.
 
 HMAC key: %s
@@ -635,9 +654,9 @@ calculated: %s'''  % (repr(name), repr(key), repr(content), repr(expected), repr
         if self.status == 'waiting':
           self.bob_responds(form)
         elif self.status == 'initiated':
-          not_acceptable = map(lambda x: x['var'], msg.T.error.T.feature.getChildren())
+          if msg.T.error and msg.T.error.feature:
+            not_acceptable = map(lambda x: x['var'], msg.T.error.T.feature.getChildren())
 
-          if not_acceptable:
             res = '''ending negotiation because your client said I didn't offer acceptable values for these fields:
 
 '''
