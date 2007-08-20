@@ -14,6 +14,8 @@ class TamperedIDSession(tests.xep116.EncryptedSessionNegotiation):
   def show_help(self, msg):
     msg = '''this bot tests a XEP-0116 implementation's response to a (4 message) negotiation that has been tampered with.
 
+you can begin a session negotiation with me several times in succession to run different tests with you as the initiator.
+
 commands:
 'begin-badhe': i'll initiate an esession where SHA256(e) != He
 'begin-bade': i'll initiate an esession with e > (p - 1) or e < 1
@@ -37,19 +39,33 @@ commands:
     tests.xep116.EncryptedSessionNegotiation.alice_initiates(self, msg)
   
   def begin_badma(self, msg):
-    self.mode = 'badma'
+    self.mode = 'badm'
     tests.xep116.EncryptedSessionNegotiation.alice_initiates(self, msg)
 
   def begin_badida(self, msg):
-    self.mode = 'badida'
+    self.mode = 'badid'
     tests.xep116.EncryptedSessionNegotiation.alice_initiates(self, msg)
 
 #  def alice_initiates(self, msg):
 #    tests.xep116.EncryptedSessionNegotiation.alice_initiates(self, msg)
 
+  def bob_responds(self, form):
+    if not self.mode:
+      self.mode = 'badd'
+      self.expect_not_implemented = True
+
+    tests.xep116.EncryptedSessionNegotiation.bob_responds(self, form)
+
   def alice_accepts(self, form):
     tests.xep116.EncryptedSessionNegotiation.alice_accepts(self, form)
     self.expect_not_implemented = True
+
+  def bob_accepts(self, form):
+    tests.xep116.EncryptedSessionNegotiation.bob_accepts(self, form)
+
+    if self.mode:
+      self.send('!!! the negotiation should have failed, your client should not display this message.')
+      self.expect_not_implemented = True
 
   def final_steps_alice(self, form):
     if self.expect_not_implemented:
@@ -77,23 +93,39 @@ commands:
   def terminate(self):
     self.mode = None
     self.status = 'waiting'
+    self.enable_encryption = False
     self.expect_not_implemented = False
 
   def handle_message(self, msg):
     if self.expect_not_implemented:
-      if msg.T.error and msg.T.error.getTag('feature-not-implemented'):
-        self.send('good, you responded to the tampered message with a <feature-not-implemented/> error. terminating session.')
+      oldmode = self.mode
 
-        self.terminate()
+      self.terminate()
+
+      if msg.T.error and msg.T.error.getTag('feature-not-implemented'):
+        if oldmode == 'badd':
+          self.send('good, you responded with a feature-not-implemented error to a message where d > (p - 1) or < -1.')
+          self.send('you can begin another negotiation to run another test.')
+          self.mode = 'badm'
+        elif oldmode == 'badm':
+          self.send('good, you responded with a feature-not-implemented error to a message with a tampered m_b.')
+          self.send('you can begin another negotiation to run another test.')
+          self.mode = 'badid'
+        elif oldmode == 'badid':
+          self.send('good, you responded with a feature-not-implemented error to a message with a tampered id_b.')
+          self.send('''this is the end of the tests for Alice.
+if you begin another negotiation I will return to the previous test.''')
+          self.mode = None
+        else:
+          self.send('good, you responded to the tampered message with a feature-not-implemented error. negotiation ended.')
 
         return
       else:
         if self.expect_not_implemented == 'still':
-          self.send('i am STILL expecting you to respond with a <feature-not-implemented/> error message, but you sent something else.')
+          self.send('i am STILL expecting you to respond with a feature-not-implemented error message, but you sent something else.')
         else:
           self.expect_not_implemented = 'still'
-          self.send('i am expecting you to respond with a <feature-not-implemented/> error message, but you sent something else.')
-
+          self.send('i am expecting you to respond with a feature-not-implemented error message, but you sent something else.')
 
     tests.xep116.EncryptedSessionNegotiation.handle_message(self, msg)
 
@@ -131,13 +163,13 @@ commands:
     return xmpp.DataField(name=name, typ='hidden', value=dhs)
 
   def sign(self, string):
-    if self.mode == 'badida':
+    if self.mode == 'badid':
       return self.random_bytes(32)
     else:
       return tests.xep116.EncryptedSessionNegotiation.sign(self, string)
 
   def make_mac_s(self, form, dh_i, pubkey_s):
-    if self.mode == 'badida':
+    if self.mode == 'badid':
       return self.random_bytes(32)
     else:
       return tests.xep116.EncryptedSessionNegotiation.make_mac_s(self, form, dh_i, pubkey_s)
@@ -145,9 +177,18 @@ commands:
   def make_identity(self, form, dh_i):
     id, mac = tests.xep116.EncryptedSessionNegotiation.make_identity(self, form, dh_i)
 
-    if self.mode == 'badma':
+    if self.mode == 'badm':
       # XXX length varies based on the hash used for the hmac
       fake_m_s = self.random_bytes(32)
       return (id, xmpp.DataField(name='mac', value=base64.b64encode(fake_m_s)))
     else:
       return (id, mac)
+  
+  def init_bobs_cryptographic_values(self, g, p, n_o):
+    fields = tests.xep116.EncryptedSessionNegotiation.init_bobs_cryptographic_values(self, g, p, n_o)
+ 
+    if self.mode == 'badd':
+      fields['dhkeys'] = self.encode_mpi(p + 1)
+
+    return fields
+

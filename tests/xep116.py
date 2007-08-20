@@ -194,23 +194,12 @@ class EncryptedSessionNegotiation(esession.ESession):
       else:
         raise 'unsupported field %s' % repr(name)
 
-    n = 128 # number of bits
-    bytes = int(n / 8)
+    fields = self.init_bobs_cryptographic_values(g, p, self.n_o)
 
-    self.n_s = self.generate_nonce()
-
-    self.c_o = self.decode_mpi(self.random_bytes(bytes)) # n-bit random number
-    self.c_s = self.c_o ^ (2 ** (n-1))
-
-    self.y = self.srand(2 ** (2 * n - 1), p - 1)
-    self.d = self.powmod(g, self.y, p)
-
-    to_add = { 'my_nonce': self.n_s, 'dhkeys': self.encode_mpi(self.d), 'counter': self.encode_mpi(self.c_o), 'nonce': self.n_o }
-
-    for name in to_add:
-      b64ed = base64.b64encode(to_add[name])
+    for name in fields:
+      b64ed = base64.b64encode(fields[name])
       x.addChild(node=xmpp.DataField(name=name, value=b64ed))
-
+     
     self.form_o = ''.join(map(lambda el: c14n.c14n(el), request_form.getChildren()))
 
     self.form_s = ''.join(map(lambda el: c14n.c14n(el), x.getChildren()))
@@ -235,6 +224,23 @@ class EncryptedSessionNegotiation(esession.ESession):
     self.send(response)
 
     self.status = 'responded'
+  
+  def init_bobs_cryptographic_values(self, g, p, n_o):
+    n = 128
+    bytes = int(n / 8)
+
+    self.n_s = self.generate_nonce()
+
+    self.c_o = self.decode_mpi(self.random_bytes(bytes)) # n-bit random number
+    self.c_s = self.c_o ^ (2 ** (n-1))
+
+    self.y = self.srand(2 ** (2 * n - 1), p - 1)
+    self.d = self.powmod(g, self.y, p)
+
+    return { 'my_nonce': self.n_s,\
+             'dhkeys': self.encode_mpi(self.d),\
+             'counter': self.encode_mpi(self.c_o),\
+             'nonce': n_o }
 
   # 4.4 esession accept (alice)
   def alice_accepts(self, form):
@@ -410,7 +416,7 @@ class EncryptedSessionNegotiation(esession.ESession):
     self.status = 'encrypted'
     self.enable_encryption = True
 
-    self.send("Congratulations! If you can read this, we've successfully negotiated a 4-message encrypted session.")
+    self.send("if you can read this, then we've successfully negotiated a 4-message encrypted session.")
 
   # 4.6 final steps (alice)
   def final_steps_alice(self, form):
