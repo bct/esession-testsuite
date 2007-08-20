@@ -12,6 +12,8 @@ from tests import *
 
 import sys
 
+import traceback
+
 import os
 import Crypto.PublicKey.RSA
 
@@ -19,7 +21,8 @@ jids = { 'xep155': xep155.SessionNegotiation,
          'xep200': xep200.FancySession,
          'xep201': xep201.FancySession,
          'xep217': xep217.SimplifiedE2E, 
-         'sigmai': sigmai.ThreeMessageSession 
+         'sigmai': sigmai.ThreeMessageSession,
+         'tampered': tampered.TamperedIDSession,
                             }
 class TestSuite:
   def __init__(self, name, server, port, secret, handlers):
@@ -120,7 +123,11 @@ class TestSuite:
     if thread_id and not sess.received_thread_id:
       sess.received_thread_id = True
 
-    sess.handle_message(msg)
+    try:
+      sess.handle_message(msg)
+    except:
+      sess.send('unrecoverable error:\n%s' % (traceback.format_exc()))
+      sess.terminate()
 
   def find_null_session(self, my_jid, eir_jid):
     all = self.sessions[my_jid][eir_jid].values()

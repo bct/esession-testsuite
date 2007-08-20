@@ -66,7 +66,7 @@ class EncryptedSessionNegotiation(esession.ESession):
                 'sign_algs': XmlDsig + 'rsa-sha256',
                 'init_pubkey': ['none', 'key', 'hash'],
     # we don't store remote keys for now, so make them send it every time
-                'init_pubkey': ['none', 'key'],
+                'resp_pubkey': ['none', 'key'],
                 'ver': '1.0',
                 'rekey_freq': '4294967295',
                 'sas_algs': 'sas28x5'
@@ -536,6 +536,17 @@ class EncryptedSessionNegotiation(esession.ESession):
     else:
       self.assert_correct_hmac(self.ks_o, content, 'mac_' + i_o, mac_o)
 
+  def make_mac_s(self, form, dh_i, pubkey_s):
+    c7lform = ''.join(map(lambda el: c14n.c14n(el), form.getChildren()))
+    content = self.n_o + self.n_s + self.encode_mpi(dh_i) + pubkey_s
+
+    if form.getType() == 'result':
+      content += self.form_s + c7lform
+    else:
+      content += c7lform
+
+    return self.hmac(self.ks_s, content)
+
   def make_identity(self, form, dh_i):
     if self.send_pubkey:
       if self.sign_algs == 'http://www.w3.org/2000/09/xmldsig#rsa-sha256':
@@ -546,17 +557,10 @@ class EncryptedSessionNegotiation(esession.ESession):
     else:
       pubkey_s = ''
 
-    c7lform = ''.join(map(lambda el: c14n.c14n(el), form.getChildren()))
-    content = self.n_o + self.n_s + self.encode_mpi(dh_i) + pubkey_s
-
-    if form.getType() == 'result':
-      content += self.form_s + c7lform
-    else:
-      content += c7lform
-
-    old_c_s = self.c_s
-    mac_s = self.hmac(self.ks_s, content)
+    mac_s = self.make_mac_s(form, dh_i, pubkey_s)
     
+    old_c_s = self.c_s
+
     if self.send_pubkey:
       signature = self.sign(mac_s)
       sign_s = '<SignatureValue xmlns="http://www.w3.org/2000/09/xmldsig#">%s</SignatureValue>' % base64.b64encode(signature)
@@ -623,7 +627,7 @@ calculated: %s'''  % (repr(name), repr(key), repr(content), repr(expected), repr
     return k
 
   def terminate(self):
-    self.status = 'waiting'
+    self.status = 'terminated'
 
   def handle_message(self, msg):
     if not msg.T.thread:
@@ -651,7 +655,7 @@ calculated: %s'''  % (repr(name), repr(key), repr(content), repr(expected), repr
       assert form['FORM_TYPE'] == 'urn:xmpp:ssn'
 
       try:
-        if self.status == 'waiting':
+        if form.getType() == 'form' and self.status == 'waiting':
           self.bob_responds(form)
         elif self.status == 'initiated':
           if msg.T.error and msg.T.error.feature:

@@ -243,6 +243,11 @@ class ESession(session.Session):
     else:
       return self.base28_chr[n]
 
+  def c7lize_mac_id(self, form):
+    kids = form.getChildren()
+    macable = filter(lambda x: x.getVar() not in ('mac', 'identity'), kids)
+    return ''.join(map(lambda el: c14n.c14n(el), macable))
+
   # this stuff is more implementation-specific
 
   def make_dhfield(self, modp_options, sigmai=False):
@@ -269,8 +274,3 @@ class ESession(session.Session):
         name = "dhhashes"
 
     return xmpp.DataField(name=name, typ='hidden', value=dhs)
-
-  def c7lize_mac_id(self, form):
-    kids = form.getChildren()
-    macable = filter(lambda x: x.getVar() not in ('mac', 'identity'), kids)
-    return ''.join(map(lambda el: c14n.c14n(el), macable))
