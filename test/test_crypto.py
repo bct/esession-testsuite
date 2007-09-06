@@ -5,6 +5,9 @@ import unittest
 from Crypto.Cipher import AES
 from Crypto.Hash import HMAC, SHA256
 
+import xmpp
+import base64
+
 class Party:
   def encode_mpi(self, n):
     if n >= 256:
@@ -14,8 +17,11 @@ class Party:
 
   def encode_mpi_with_padding(self, n):
     ret = self.encode_mpi(n)
-    len_padding = 16 - (len(ret) % 16)
-    ret = (len_padding * '\x00') + ret
+
+    mod = len(ret) % 16
+    if mod != 0:
+      ret = ((16 - mod) * '\x00') + ret
+
     return ret
 
   def decode_mpi(self, s):
@@ -46,22 +52,22 @@ class Party:
     self.compression = None
 
   def encryptcounter(self):
-    self.old_en_counter = self.en_counter
     self.en_counter = (self.en_counter + 1) % 2 ** self.n
- 
+
     # XXX correct representation of the counter?
     return self.encode_mpi_with_padding(self.en_counter)
 
   def decryptcounter(self):
-    self.old_de_counter = self.de_counter
     self.de_counter = (self.de_counter + 1) % 2 ** self.n
 
     return self.encode_mpi_with_padding(self.de_counter)
 
   def encrypt_stanza(self, stanza):
-    # XXX
-    #  <defined-condition xmlns='urn:ietf:params:xml:ns:xmpp-stanzas'/> child elements of <error/> elements. [13]
+    # all children except <error/>, <amp/>, <thread>, XXX
+    #  <defined-condition xmlns='urn:ietf:params:xml:ns:xmpp-stanzas'/> child elements of <error/> elements.
     encryptable = filter(lambda x: x.getName() not in ('error', 'amp', 'thread'), stanza.getChildren())
+
+    old_en_counter = self.en_counter
 
     for element in encryptable:
       stanza.delChild(element)
@@ -78,15 +84,12 @@ class Party:
     # XXX <key/> elements ?
 
     m_content = str(c.getTag('data'))
-    c.NT.mac = base64.b64encode(self.hmac(m_content, True))
+    c.NT.mac = base64.b64encode(self.hmac(m_content, old_en_counter, self.en_key))
 
     return stanza
 
-  def hmac(self, macable, encrypting):
-    if encrypting:
-      return HMAC(self.en_key, macable + self.old_en_counter, self.hash_alg).digest()
-    else:
-      return HMAC(self.de_key, macable + self.de_counter, self.hash_alg).digest()
+  def hmac(self, content, counter, key):
+    return HMAC.new(key, content + self.encode_mpi_with_padding(counter), self.hash_alg).digest()
 
   def compress(self, plaintext):
     if self.compression == None:
@@ -107,18 +110,30 @@ class Party:
     c = stanza.T.c
     # XXX check namespace
 
+    stanza.delChild(c)
+
     # contents of <c>, minus <mac>, minus whitespace
-    macable = map(str, filter(lambda x: x.getName != 'mac', c.getChildren()))
+    macable = ''.join(map(str, filter(lambda x: x.getName() != 'mac', c.getChildren())))
 
-    received_mac = base64.b64decode(stanza.getTagData('mac'))
+    received_mac = base64.b64decode(c.getTagData('mac'))
+    calculated_mac = self.hmac(macable, self.de_counter, self.de_key)
 
-    if not self.hmac(macable, False) == received_mac:
-      raise 'bad signature'
+    if not calculated_mac == received_mac:
+      raise 'bad signature (%s != %s)' % (repr(received_mac), repr(calculated_mac))
 
-    compressed = self.decrypt(ciphertext)
+    m_final = base64.b64decode(c.getTagData('data'))
+    m_compressed = self.decrypt(m_final)
+    plaintext = self.decompress(m_compressed)
 
-    plaintext = self.decompress(compressed)
-    # XXX shove it back into the stanza
+    try:
+      parsed = xmpp.Node(node='<node>' + plaintext + '</node>')
+    except:
+      raise '''looks like i couldn't decrypt your <data/>'''
+
+    for child in parsed.getChildren():
+      stanza.addChild(node=child)
+
+    return stanza
 
   def decrypt(self, ciphertext):
     return self.decrypter.decrypt(ciphertext)
@@ -145,7 +160,46 @@ class TestCanonicalization(unittest.TestCase):
     alice = Party(a_key, b_key, a_counter, b_counter)
     bob =   Party(b_key, a_key, b_counter, a_counter)
 
-
+    msg = xmpp.Message(node='''<message from='alice@example.org/pda'
+         to='bob@example.com/laptop'
+         type='chat'>
+  <thread>ffd7076498744578d10edabfe7f4a866</thread>
+  <body>Hello, Bob!</body>
+  <amp xmlns='http://jabber.org/protocol/amp'>
+    <rule action='error' condition='match-resource' value='exact'/>
+  </amp>
+  <active xmlns='http://jabber.org/protocol/chatstates'/>
+</message>''')
   
+    encrypted = alice.encrypt_stanza(msg)
+
+    self.assert_(isinstance(encrypted, xmpp.Message))
+    self.assertEqual('ffd7076498744578d10edabfe7f4a866', encrypted.getThread())
+    self.assert_(isinstance(encrypted.getTag('amp'), xmpp.Node)) 
+
+    self.assertEqual(None, encrypted.getTag('body'))
+    self.assertEqual(None, encrypted.getTag('active'))
+
+    c = encrypted.getTag('c')
+    self.assertEqual('http://www.xmpp.org/extensions/xep-0200.html#ns', c.getNamespace())
+    self.assert_(isinstance(c.getTag('data'), xmpp.Node))
+    self.assert_(isinstance(c.getTag('mac'), xmpp.Node))
+
+    restored = bob.decrypt_stanza(msg)
+
+    self.assertEqual('Hello, Bob!', restored.getBody())
+    self.assertEqual(None, restored.getTag('c'))
+    self.assert_(isinstance(encrypted.getTag('amp'), xmpp.Node)) 
+    self.assert_(isinstance(encrypted.getTag('active'), xmpp.Node)) 
+
+    msg = xmpp.Message(node='''<message to='alice@example.org/pda'
+         from='bob@example.com/laptop'
+         type='chat'>
+  <thread>ffd7076498744578d10edabfe7f4a866</thread>
+  <body>Hello, Alice!</body>
+</message>''')
+
+    self.assertEqual('Hello, Alice!', alice.decrypt_stanza(bob.encrypt_stanza(msg)).getBody())
+
 if __name__ == '__main__':
 	unittest.main()
