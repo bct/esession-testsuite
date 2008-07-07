@@ -20,7 +20,7 @@ import Crypto.PublicKey.RSA
 jids = { 'xep155': xep155.SessionNegotiation,
          'xep200': xep200.FancySession,
          'xep201': xep201.FancySession,
-         'xep217': xep217.SimplifiedE2E, 
+         'xep217': xep217.SimplifiedE2E,
          'sigmai': sigmai.ThreeMessageSession,
          'tampered': tampered.TamperedIDSession,
                             }
@@ -35,7 +35,7 @@ class TestSuite:
     self.conn = client.Component(name)
 
     self.sessions = {}
- 
+
     # retained secret storage:
 
     # terminated: [terminated_secrets],
@@ -76,7 +76,7 @@ class TestSuite:
 
    # for node in self.handlers:
    #     self.conn.send(Presence(frm=node + '@testsuite.necronomicorp.com')) # XXX
-    
+
     while 1:
       self.conn.Process(1)
 
@@ -116,7 +116,10 @@ class TestSuite:
       else:
         sess = self.sessions[my_jid][eir_jid][thread_id]
     except KeyError:
-      handler = self.handlers[my_jid.split('@')[0]]
+      try:
+        handler = self.handlers[my_jid.split('@')[0]]
+      except KeyError:
+        raise 'dont have a thing with ' + my_jid
 
       sess = self.start_new_session(my_jid, eir_jid, handler, thread_id)
 
