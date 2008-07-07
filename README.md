@@ -13,17 +13,17 @@ It was originally written as part of Google Summer of Code 2007 for the XMPP Sof
 
 The suite is implemented as a server component that responds to a number of different JIDs, each responsible for a different set of tests:
 
-- xep201@<component>
+- xep201@[component]
   - tests
-- xep155@<component>:
+- xep155@[component]:
   - simple generic session negotiation
-- xep200@<component>
+- xep200@[component]
   - message encryption and decryption with hardcoded keys
-- xep217@<component>
+- xep217@[component]
   - a simplified profile of XEP-0116
-- sigmai@<component>
+- sigmai@[component]
   - XEP-0116 3-message negotiation
-- tampered@<component>
+- tampered@[component]
   - runs a XEP-0116 negotiation with data that your client should reject
 
 To run the suite, you'll need to set up your server to accept a component connection. Then:
